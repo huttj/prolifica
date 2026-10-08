@@ -1242,9 +1242,12 @@ function SeaSearch({ world, onPick }: { world: World; onPick: (m: Isl) => void }
   const [q, setQ] = useState('')
   const [at, setAt] = useState(0)
   const found = useMemo(() => {
-    const s = q.trim().toLowerCase()
-    if (!s) return []
-    return world.isles.filter((m) => m.title.toLowerCase().includes(s) || m.by.toLowerCase().includes(s)).sort((a, b) => b.stars - a.stars).slice(0, 8)
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (!words.length) return []
+    // every word somewhere in what the isle is called: its title, its short title, its kind of page, its author
+    const hay = (m: Isl) => [m.title, m.short ?? '', m.label, m.fam.name, plural(m.fam.name), m.by].join(' \u0001 ').toLowerCase()
+    const rank = (m: Isl) => { const n = `${m.short ?? m.label} ${m.title}`.toLowerCase(); return words.every((w) => n.includes(w)) ? 0 : 1 }
+    return world.isles.filter((m) => { const h = hay(m); return words.every((w) => h.includes(w)) }).sort((a, b) => rank(a) - rank(b) || b.stars - a.stars).slice(0, 8)
   }, [q, world])
   const pick = (m: Isl) => {
     onPick(m)
@@ -1274,12 +1277,15 @@ function SeaSearch({ world, onPick }: { world: World; onPick: (m: Isl) => void }
           {found.length ? (
             found.map((m, i) => (
               <button key={m.id} className={i === at ? 'on' : ''} onMouseEnter={() => setAt(i)} onClick={() => pick(m)}>
-                <span className="ellipsis grow">{m.title}</span>
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="ellipsis" style={{ display: 'block' }}>{m.short ?? m.label ?? m.title}</span>
+                  <span className="ellipsis tiny muted" style={{ display: 'block' }}>{m.fam.name ? `${m.fam.name} · ` : ''}{m.title}</span>
+                </span>
                 <span className="tiny muted">{m.by}</span>
               </button>
             ))
           ) : (
-            <div className="small muted" style={{ padding: '8px 10px' }}>No isle by that name.</div>
+            <div className="small muted" style={{ padding: '8px 10px' }}>No isle matches that.</div>
           )}
         </div>
       )}
