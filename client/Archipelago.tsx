@@ -90,10 +90,16 @@ interface Isl {
   /** the layout tree inside its view group: its real parent when that's in the group, else the group's first isle */
   lk: Isl[]
   ld: number
+  /** the publisher's one-to-three-word name for it, if any */
+  short: string | null
+  /** what the map writes under it: what's particular to it, without its group's name */
+  label: string
   seed: number
 }
 
 interface Shoal {
+  /** how much data it is: the sandbank's size follows it */
+  bytes: number
   id: string | null
   name: string | null
   kind: string
@@ -140,7 +146,7 @@ const cellKey = (x: number, y: number) => `${Math.floor(x / CELL)},${Math.floor(
 
 function buildWorld(chart: SeaChart): World {
   const byId = new Map<string, Isl>()
-  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page], n) => {
+  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page, short], n) => {
     const [handle, name] = chart.people[p] ?? [null, null]
     const seed = hash(id)
     const isl = {
@@ -166,6 +172,8 @@ function buildWorld(chart: SeaChart): World {
       srcs: [...new Set(data.flatMap((d) => (chart.data[d]?.[3]?.length ? chart.data[d]![3]! : [d])))],
       page: page ?? -1 - n,
       view: -1,
+      short: short?.trim() || null,
+      label: '',
     } as unknown as Isl
     byId.set(id, isl)
     return isl
@@ -231,7 +239,9 @@ function buildWorld(chart: SeaChart): World {
   for (const members of groups.values()) {
     const root = members[0]!
     const inGroup = new Set(members)
-    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0 }
+    // a group of one is named for its isle (its short title), and the isle itself then needs no label
+    const fam: Fam = { name: members.length > 1 ? viewName(members) : (root.short ?? shortOf(root.title)), root, members, shoals: [], x: 0, y: 0, R: 0 }
+    for (const m of members) m.label = members.length > 1 ? (m.short ?? shortOf(detailOf(m.title, fam.name))) : ''
     for (const m of members) { m.fam = fam; m.lk = []; m.ld = 0 }
     for (const m of members) if (m !== root) (m.parent && inGroup.has(m.parent) ? m.parent : root).lk.push(m)
     const depth = (n: Isl, d: number) => { n.ld = d; for (const k of n.lk) depth(k, d + 1) }
@@ -241,7 +251,7 @@ function buildWorld(chart: SeaChart): World {
   for (const f of fams) layoutFamily(f)
 
   // sandbanks: one per dataset, under the family of the first isle that showed it
-  const shoals: Shoal[] = chart.data.map(([id, path, kind]) => ({ id, name: path ? (path.split('/').pop() ?? path) : null, kind, users: [], x: 0, y: 0, rx: 0, ry: 0, shape: 0 }))
+  const shoals: Shoal[] = chart.data.map(([id, path, kind, , bytes]) => ({ id, name: path ? (path.split('/').pop() ?? path) : null, kind, users: [], x: 0, y: 0, rx: 0, ry: 0, shape: 0, bytes: bytes ?? 0 }))
   for (const i of isles) for (const d of i.data) shoals[d]?.users.push(i)
   for (const [k, s] of shoals.entries()) {
     if (!s.users.length) continue
@@ -254,14 +264,17 @@ function buildWorld(chart: SeaChart): World {
       const a = rand() * Math.PI * 2
       s.x = u.x + Math.cos(a) * u.r * 0.45
       s.y = u.y + Math.sin(a) * u.r * 0.45
-      s.rx = u.r * (1.6 + rand() * 0.4)
-      s.ry = u.r * (1.4 + rand() * 0.4)
+      // more data, more sand: from a sliver for a few KB to wide flats for megabytes
+      const amount = Math.min(2.3, Math.max(0.75, 0.75 + 0.2 * Math.log2(1 + s.bytes / 8192)))
+      s.rx = u.r * (1.2 + rand() * 0.3) * amount
+      s.ry = u.r * (1.05 + rand() * 0.3) * amount
     } else {
       s.x = local.reduce((t, u) => t + u.x, 0) / local.length
       s.y = local.reduce((t, u) => t + u.y, 0) / local.length
       const rad = Math.max(...local.map((u) => Math.hypot(u.x - s.x, u.y - s.y) + u.r * 1.3))
-      s.rx = rad * (1.0 + rand() * 0.15)
-      s.ry = rad * (0.9 + rand() * 0.15)
+      const amount = Math.min(1.8, Math.max(1, 0.85 + 0.12 * Math.log2(1 + s.bytes / 8192)))
+      s.rx = rad * (1.0 + rand() * 0.15) * amount
+      s.ry = rad * (0.9 + rand() * 0.15) * amount
     }
     fam.shoals.push(s)
   }
@@ -329,6 +342,30 @@ function kin(w: World, m: Isl) {
   return { view, data }
 }
 
+/** A title without its group's name: "Discourse map: Bike assault" in "Discourse map" is "Bike assault"; "Who Runs Kennewick" in "Who Runs" is "Kennewick". */
+function detailOf(title: string, group: string): string {
+  const t = title.trim()
+  const g = group.trim().toLowerCase()
+  if (!g || g === t.toLowerCase()) return t
+  const sep = /^[\s:—–\-|·,]+|[\s:—–\-|·,]+$/g
+  if (t.toLowerCase().startsWith(g)) return t.slice(g.length).replace(sep, '') || t
+  const at = t.toLowerCase().indexOf(g)
+  if (at >= 0 && (at === 0 || /\W/.test(t[at - 1]!)) && (at + g.length === t.length || /\W/.test(t[at + g.length]!)))
+    return (t.slice(0, at) + ' ' + t.slice(at + g.length)).replace(/\s+/g, ' ').replace(sep, '') || t
+  return t
+}
+
+/** At most three words, for the map, when the publisher didn't give a short title. */
+function shortOf(text: string): string {
+  const head = text.split(/\s[—–|]\s|:\s|\s\(/)[0]!.trim()
+  const words = head.split(/\s+/).filter(Boolean)
+  if (words.length <= 3) return head
+  const stop = /^(a|an|the|of|on|in|at|to|for|by|as|and|or|from|with|who|what|is|are|was)$/i
+  const pick = words.slice(0, 3)
+  while (pick.length > 1 && stop.test(pick[pick.length - 1]!)) pick.pop()
+  return pick.join(' ') + '…'
+}
+
 /**
  * A group's name: the part before a colon most of its titles share ("Discourse map"), else the longest run
  * of words they all share ("Argument graph" from "Dark matter argument graph" and "Argument graph: …"),
@@ -365,8 +402,8 @@ function layoutFamily(f: Fam) {
   }
   count(f.root)
   for (const m of f.members) {
-    const r = 18 + 6 * Math.log2(1 + m.stars) + 3.5 * Math.log2(1 + m.descendants) + (m === f.root && m.descendants ? 4 : 0)
-    m.r = Math.min(r, 72)
+    // an island's size is how much grew from it: every remix below it, at any depth
+    m.r = Math.min(18 + 8 * Math.log2(1 + m.descendants), 72)
   }
   const levels: Isl[][] = []
   for (const m of f.members) (levels[m.ld] ??= []).push(m)
@@ -772,13 +809,17 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     const r = m.r * k
     ctx.font = `600 12px ${t.font}`
     // titles wrap under the island; more lines as you get closer
-    const lines = wrapText(ctx, m.title, Math.max(170, Math.min(240, r * 2.6)), r >= 20 ? 3 : 2)
-    const tw = Math.max(...lines.map((l) => ctx.measureText(l).width))
+    const lines = m.label ? wrapText(ctx, m.label, Math.max(140, Math.min(220, r * 2.4)), 2) : []
     const x = sx(m.x)
     const y = sy(m.y) + r * 1.12 + 13
-    const sub = r >= 20 ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
-    const subY = y + (lines.length - 1) * 14 + 14
+    const sub = r >= 20 || !lines.length ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
+    ctx.font = `500 11px ${t.font}`
+    const subW = sub ? ctx.measureText(sub).width : 0
+    ctx.font = `600 12px ${t.font}`
+    const tw = Math.max(subW, ...lines.map((l) => ctx.measureText(l).width))
+    const subY = lines.length ? y + (lines.length - 1) * 14 + 14 : y
     if (!free(x - tw / 2 - 3, y - 12, x + tw / 2 + 3, (sub ? subY : subY - 14) + 4)) continue
+    ctx.font = `600 12px ${t.font}`
     ctx.globalAlpha = lit.size && !lit.has(m) ? 0.35 : 1
     ctx.strokeStyle = t.deep
     ctx.lineWidth = 3.5
@@ -798,12 +839,11 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   // each view's group is named over its shelf, the way a chart names an island group
   ctx.font = `italic 600 12px ${t.font}`
   for (const f of fams) {
-    if (f.members.length < 2) continue
     const top = f.members.reduce((a, m) => (m.y - m.r < a.y - a.r ? m : a), f.members[0]!)
     const cx = f.members.reduce((t2, m) => t2 + m.x, 0) / f.members.length
     const x = sx(cx)
     const y = sy(top.y) - top.r * k * 2.3 - 8
-    if (f.R * k < 40 || y < 14 || y > H || x < -100 || x > W + 100) continue
+    if (f.R * k < (f.members.length > 1 ? 40 : 22) || y < 14 || y > H || x < -100 || x > W + 100) continue
     const label = trim(f.name.toUpperCase(), 40)
     const spaced = label.split('').join('\u2009')
     const tw = ctx.measureText(spaced).width

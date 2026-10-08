@@ -90,6 +90,8 @@ export interface IsleRow {
   draws: string | null
   /** JSON [{part, what}]: what this version changed, component by component */
   changes: string | null
+  /** one to three words, for the map */
+  short_title: string | null
   star_count: number
   created_at: number
   updated_at: number
@@ -132,6 +134,8 @@ export interface PublishInput {
   drawsFrom?: { isle: string; version?: number; note?: string; parts?: string[] }[]
   /** what this version changed, part by part: [{part, what}] (part: a component, ideally its data-pid) */
   changes?: { part: string; what: string }[]
+  /** one to three words for the map ("Kennewick", "Bike assault"); null clears it */
+  shortTitle?: string | null
   /** internal: put back a page this isle had before (restoring a version) */
   sourceBlob?: string
 }
@@ -891,6 +895,8 @@ export class Store {
       ? JSON.stringify(input.changes.filter((c) => c && c.part && c.what).slice(0, 40).map((c) => ({ part: partName(String(c.part)), what: String(c.what).slice(0, 600) }))) || null
       : undefined
 
+    const shortTitle = input.shortTitle === undefined ? undefined : input.shortTitle === null ? null : input.shortTitle.trim().replace(/\s+/g, ' ').slice(0, 40) || null
+
     const now = Date.now()
     const id = existing?.id ?? shortId()
     const samePage = existing && existing.source_blob === sourceHash && existing.bindings === JSON.stringify(bindingIds) && existing.slots === JSON.stringify(slots)
@@ -910,6 +916,7 @@ export class Store {
       ])
     }
     if (existing && relation !== existing.relation) await this.d1.prepare('UPDATE isles SET relation = ? WHERE id = ?').bind(relation, id).run()
+    if (shortTitle !== undefined) await this.d1.prepare('UPDATE isles SET short_title = ? WHERE id = ?').bind(shortTitle, id).run()
     if (!existing) {
       await this.d1
         .prepare(
@@ -1089,18 +1096,18 @@ export class Store {
   async chart(limit = 20000): Promise<SeaChart> {
     const isles = await this.d1
       .prepare(
-        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.source_blob, u.handle, u.name
+        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.source_blob, i.short_title, u.handle, u.name
          FROM isles i JOIN users u ON u.id = i.owner_id
          WHERE i.deleted_at IS NULL AND i.visibility = 'public' ORDER BY i.created_at LIMIT ?`,
       )
       .bind(limit)
-      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'source_blob'> & { handle: string | null; name: string | null }>()
+      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'source_blob' | 'short_title'> & { handle: string | null; name: string | null }>()
     const data = await this.d1
       .prepare(
-        `SELECT DISTINCT d.id, d.path, d.kind, d.public FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
+        `SELECT DISTINCT d.id, d.path, d.kind, d.public, d.size FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
          WHERE i.deleted_at IS NULL AND i.visibility = 'public' AND d.deleted_at IS NULL`,
       )
-      .all<{ id: string; path: string; kind: string; public: number }>()
+      .all<{ id: string; path: string; kind: string; public: number; size: number }>()
     // where each shown dataset came from: walk derived-from up to the original data (a dataset with no parents)
     const roots = await this.d1
       .prepare(
@@ -1112,18 +1119,18 @@ export class Store {
            SELECT up.start, e.dst_id, up.depth + 1 FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
            WHERE up.depth < 24
          )
-         SELECT DISTINCT up.start, d.id, d.path, d.kind, d.public FROM up JOIN datasets d ON d.id = up.id AND d.deleted_at IS NULL
+         SELECT DISTINCT up.start, d.id, d.path, d.kind, d.public, d.size FROM up JOIN datasets d ON d.id = up.id AND d.deleted_at IS NULL
          WHERE up.depth > 0 AND NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')`,
       )
-      .all<{ start: string; id: string; path: string; kind: string; public: number }>()
+      .all<{ start: string; id: string; path: string; kind: string; public: number; size: number }>()
     const dataIndex = new Map<string, number>()
     const chart: SeaChart = { islesOrigin: islesOrigin(this.request, this.env), people: [], data: [], isles: [] }
-    const addData = (d: { id: string; path: string; kind: string; public: number }) => {
+    const addData = (d: { id: string; path: string; kind: string; public: number; size: number }) => {
       let i = dataIndex.get(d.id)
       if (i === undefined) {
         i = chart.data.length
         dataIndex.set(d.id, i)
-        chart.data.push(d.public ? [d.id, d.path, d.kind, []] : [null, null, d.kind, []])
+        chart.data.push(d.public ? [d.id, d.path, d.kind, [], d.size] : [null, null, d.kind, [], d.size])
       }
       return i
     }
@@ -1152,7 +1159,7 @@ export class Store {
       const parent = r.parent_id && shown.has(r.parent_id) ? r.parent_id : null
       let page = pageIndex.get(r.source_blob)
       if (page === undefined) pageIndex.set(r.source_blob, (page = pageIndex.size))
-      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.shot_version ?? 0, page])
+      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.shot_version ?? 0, page, r.short_title ?? null])
     }
     return chart
   }

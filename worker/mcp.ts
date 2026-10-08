@@ -100,6 +100,8 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   once and rebind or point the others at it; otherwise edit each, and give each one draws_from the
   isle/version the change came from, with the same part names.
 - view: "same" or "new" whenever you pass html with a parent (see above).
+- short_title: one to three words for the map, naming what's particular to this isle ("Kennewick",
+  "Bike assault"), not the kind of page — the map names each group of same-view isles already.
 - When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
   fixed something small; it is the same view) or view: "new" (it looks or works differently). If you
   don't say, a near-identical page counts as the same view.
@@ -274,6 +276,7 @@ const TOOLS = [
       view: s('"same" if the page is still the same view (adapted to data, small fixes), "new" if it now looks or works differently', { enum: ['same', 'new'] }),
       as_remix: { type: 'boolean', description: 'Publish the edited page as a new isle with this one as its parent, instead of updating it' },
       title: s('With as_remix: the new isle\'s title'),
+      short_title: s('With as_remix: one to three words for the map'),
       bindings: { type: 'object', description: 'With as_remix: slot -> dataset id for the new isle (default: keep the original\'s)', additionalProperties: { type: 'string' } },
       changes: { type: 'array', description: 'What this version changed, part by part: [{part, what}], part being a component of the page (use its data-pid when it has one, e.g. "legend", "selected-tweet"). Lets people follow one component\'s history across the family.', items: obj({ part: s('The component'), what: s('What changed in it') }, ['part', 'what']) },
       draws_from: { type: 'array', description: 'Other isles this version pulls changes from (not its parent): e.g. you brought in a sibling remix\'s new sidebar. [{isle, version (default: its latest), note: what you took}]. Shown as a converging edge in the family graph.', items: obj({ isle: s('Isle id'), version: { type: 'integer' }, note: s('What you took from it'), parts: { type: 'array', items: { type: 'string' }, description: 'Which components you took (data-pid names)' } }, ['isle']) },
@@ -308,7 +311,8 @@ const TOOLS = [
       'Publish an isle (an HTML page with data slots), update your own (id), or remix someone\'s (parent). For a rebind (same page, new data) pass from or parent plus bindings and no html. Read guide first.',
     inputSchema: obj({
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
-      title: s('Short title'),
+      title: s('Title'),
+      short_title: s('One to three words for the map, naming what is particular to this one ("Kennewick", "Bike assault", "OpenAI firings"): the map already shows what kind of page it is'),
       description: s('What it shows and what data shape it expects'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
       bindings: { type: 'object', description: 'Slot name -> dataset id', additionalProperties: { type: 'string' } },
@@ -614,7 +618,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       const mine = row.owner_id === user.id
       if (!mine && !args.as_remix) throw new StoreError(403, `"${isle.title}" isn't yours, so it can't change in place. Pass as_remix: true to publish your own version with these edits.`)
       const { isle: out } = args.as_remix
-        ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
+        ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, shortTitle: str(args.short_title), bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
         : await store.publishIsle({ id, html, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
       shootLater(ctx, env, out.id, islesOrigin(request, env))
       return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, next: 'check_isle to see it' })
@@ -674,6 +678,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         view: args.view === 'same' || args.view === 'new' ? args.view : undefined,
         drawsFrom: drawsOf(args.draws_from),
         changes: changesOf(args.changes),
+        shortTitle: typeof args.short_title === 'string' ? args.short_title : undefined,
       })
       shootLater(ctx, env, isle.id, islesOrigin(request, env))
       const unbound = Object.entries(isle.bindings).filter(([, d]) => !d).map(([k]) => k)

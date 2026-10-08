@@ -219,17 +219,18 @@ export interface SeaChart {
   /** [handle, name] */
   people: [string | null, string | null][]
   /**
-   * [id, path, kind, sources]. Data that isn't public still shows (as an unnamed shoal), so id and path are null.
+   * [id, path, kind, sources, bytes]. Data that isn't public still shows (as an unnamed shoal), so id and path are null.
    * sources: the original data it was derived from (indexes into this list; empty when it is itself original).
    * Original data that no isle shows directly is listed too, so two isles on data derived from the same
    * source can be seen to share it.
    */
-  data: [string | null, string | null, string, number[]?][]
+  data: [string | null, string | null, string, number[]?, number?][]
   /**
-   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot version (0: none yet), page].
+   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot version (0: none yet), page, short title].
    * page: isles with the same number run the same page (the same HTML), whatever data they show.
+   * short title: one to three words for the map, when its publisher gave one.
    */
-  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?][]
+  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?, (string | null)?][]
 }
 
 /** How one step in a family's history differs from the one before it. */
