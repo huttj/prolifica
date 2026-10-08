@@ -92,7 +92,9 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
       <button
         className="btn primary ask-caret"
         title="Use a different AI"
+        disabled={disabled}
         onClick={() => {
+          if (disabled) return
           if (menu) return setMenu(null)
           const r = root.current!.getBoundingClientRect()
           const up = window.innerHeight - r.bottom < 100

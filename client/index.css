@@ -288,7 +288,7 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .choice input { margin-top: 3px; accent-color: var(--accent-2); }
 .ask { display: inline-flex; }
 .ask .ask-main { border-radius: 10px 0 0 10px; }
-.ask .ask-main.disabled { opacity: 0.5; pointer-events: none; }
+.ask .ask-main.disabled, .ask .ask-caret:disabled { opacity: 0.5; pointer-events: none; }
 .ask .ask-caret { border-radius: 0 10px 10px 0; border-left: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent); padding: 7px 8px; }
 .ask .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
 .ask-menu { position: fixed; z-index: 70; padding: 4px; min-width: 180px; }
