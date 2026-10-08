@@ -92,6 +92,8 @@ export interface IsleRow {
   changes: string | null
   /** one to three words, for the map */
   short_title: string | null
+  /** what kind of page it is ("Discourse map"): the format, not the content */
+  view_name: string | null
   star_count: number
   created_at: number
   updated_at: number
@@ -136,6 +138,8 @@ export interface PublishInput {
   changes?: { part: string; what: string }[]
   /** one to three words for the map ("Kennewick", "Bike assault"); null clears it */
   shortTitle?: string | null
+  /** what kind of page it is, the format ("Discourse map", "City guide"); a rebind inherits its parent's */
+  viewName?: string | null
   /** internal: put back a page this isle had before (restoring a version) */
   sourceBlob?: string
 }
@@ -619,6 +623,8 @@ export class Store {
     return {
       id: row.id,
       title: row.title,
+      shortTitle: row.short_title ?? null,
+      viewName: row.view_name ?? null,
       description: row.description,
       owner: this.person(row.owner_id),
       visibility: row.visibility,
@@ -896,6 +902,9 @@ export class Store {
       : undefined
 
     const shortTitle = input.shortTitle === undefined ? undefined : input.shortTitle === null ? null : input.shortTitle.trim().replace(/\s+/g, ' ').slice(0, 40) || null
+    let viewName = input.viewName === undefined ? undefined : input.viewName === null ? null : input.viewName.trim().replace(/\s+/g, ' ').slice(0, 40) || null
+    // same page, new data: it is the same kind of page as its parent
+    if (viewName === undefined && !existing && parent && relation === 'rebind' && parent.view_name) viewName = parent.view_name
 
     const now = Date.now()
     const id = existing?.id ?? shortId()
@@ -917,6 +926,7 @@ export class Store {
     }
     if (existing && relation !== existing.relation) await this.d1.prepare('UPDATE isles SET relation = ? WHERE id = ?').bind(relation, id).run()
     if (shortTitle !== undefined) await this.d1.prepare('UPDATE isles SET short_title = ? WHERE id = ?').bind(shortTitle, id).run()
+    if (viewName !== undefined) await this.d1.prepare('UPDATE isles SET view_name = ? WHERE id = ?').bind(viewName, id).run()
     if (!existing) {
       await this.d1
         .prepare(
@@ -1096,12 +1106,12 @@ export class Store {
   async chart(limit = 20000): Promise<SeaChart> {
     const isles = await this.d1
       .prepare(
-        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.source_blob, i.short_title, u.handle, u.name
+        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.source_blob, i.short_title, i.view_name, u.handle, u.name
          FROM isles i JOIN users u ON u.id = i.owner_id
          WHERE i.deleted_at IS NULL AND i.visibility = 'public' ORDER BY i.created_at LIMIT ?`,
       )
       .bind(limit)
-      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'source_blob' | 'short_title'> & { handle: string | null; name: string | null }>()
+      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'source_blob' | 'short_title' | 'view_name'> & { handle: string | null; name: string | null }>()
     const data = await this.d1
       .prepare(
         `SELECT DISTINCT d.id, d.path, d.kind, d.public, d.size FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
@@ -1159,7 +1169,7 @@ export class Store {
       const parent = r.parent_id && shown.has(r.parent_id) ? r.parent_id : null
       let page = pageIndex.get(r.source_blob)
       if (page === undefined) pageIndex.set(r.source_blob, (page = pageIndex.size))
-      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.shot_version ?? 0, page, r.short_title ?? null])
+      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.shot_version ?? 0, page, r.short_title ?? null, r.view_name ?? null])
     }
     return chart
   }

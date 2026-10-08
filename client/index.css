@@ -171,6 +171,7 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .isle-page { display: flex; flex-direction: column; height: calc(100dvh - 57px); }
 .isle-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
 .isle-bar h1 { font-size: 17px; font-weight: 700; }
+.isle-kind { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--sea-ink); margin-bottom: 1px; }
 .isle-bar .sub { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .isle-bar .sub a { text-decoration: none; font-weight: 600; color: var(--ink-2); }
 .isle-bar .sub a:hover { text-decoration: underline; }

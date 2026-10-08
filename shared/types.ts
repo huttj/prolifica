@@ -69,6 +69,10 @@ export type Visibility = 'public' | 'unlisted' | 'private'
 export interface IsleSummary {
   id: string
   title: string
+  /** one to three words naming what's particular to it, for the map */
+  shortTitle: string | null
+  /** what kind of page it is ("Discourse map"), shared by its same-view group */
+  viewName: string | null
   description: string | null
   owner: Person
   visibility: Visibility
@@ -226,11 +230,12 @@ export interface SeaChart {
    */
   data: [string | null, string | null, string, number[]?, number?][]
   /**
-   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot version (0: none yet), page, short title].
+   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot version (0: none yet), page, short title, view name].
    * page: isles with the same number run the same page (the same HTML), whatever data they show.
    * short title: one to three words for the map, when its publisher gave one.
+   * view name: what kind of page it is ("Discourse map"), naming its group on the map.
    */
-  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?, (string | null)?][]
+  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?, (string | null)?, (string | null)?][]
 }
 
 /** How one step in a family's history differs from the one before it. */

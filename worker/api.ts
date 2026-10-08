@@ -201,8 +201,8 @@ api.get('/api/isles/:id/source', async (request, env) => {
 })
 api.get('/api/isles/:id/evolution', (request, env) => store(request, env).evolution(request.params.id!))
 api.patch('/api/isles/:id', requireAuth, async (request, env) => {
-  const b = await body<{ title?: string; description?: string | null; visibility?: Visibility }>(request)
-  return (await store(request, env).publishIsle({ id: request.params.id, title: b.title, description: b.description, visibility: b.visibility })).isle
+  const b = await body<{ title?: string; description?: string | null; visibility?: Visibility; shortTitle?: string | null; viewName?: string | null }>(request)
+  return (await store(request, env).publishIsle({ id: request.params.id, title: b.title, description: b.description, visibility: b.visibility, shortTitle: b.shortTitle, viewName: b.viewName })).isle
 })
 api.delete('/api/isles/:id', requireAuth, async (request, env) => {
   await store(request, env).deleteIsle(request.params.id!)

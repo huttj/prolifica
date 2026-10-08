@@ -74,7 +74,7 @@ export const api = {
   isle: (id: string) => call<Isle>('GET', `/api/isles/${id}`),
   isleSource: (id: string, v?: number) => call<string>('GET', `/api/isles/${id}/source${v ? `?v=${v}` : ''}`, undefined, { as: 'text' }),
   evolution: (id: string) => call<Evolution>('GET', `/api/isles/${id}/evolution`),
-  updateIsle: (id: string, patch: { title?: string; description?: string | null; visibility?: Visibility }) => call<Isle>('PATCH', `/api/isles/${id}`, patch),
+  updateIsle: (id: string, patch: { title?: string; description?: string | null; visibility?: Visibility; shortTitle?: string | null; viewName?: string | null }) => call<Isle>('PATCH', `/api/isles/${id}`, patch),
   deleteIsle: (id: string) => call('DELETE', `/api/isles/${id}`),
   rebind: (id: string, bindings: Record<string, string>, title?: string) => call<Isle>('POST', `/api/isles/${id}/rebind`, { bindings, title }),
   isleLineage: (id: string) => call<Lineage>('GET', `/api/isles/${id}/lineage`),

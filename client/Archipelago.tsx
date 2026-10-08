@@ -92,6 +92,8 @@ interface Isl {
   ld: number
   /** the publisher's one-to-three-word name for it, if any */
   short: string | null
+  /** what kind of page it is ("Discourse map"), if its publisher said */
+  viewName: string | null
   /** what the map writes under it: what's particular to it, without its group's name */
   label: string
   seed: number
@@ -146,7 +148,7 @@ const cellKey = (x: number, y: number) => `${Math.floor(x / CELL)},${Math.floor(
 
 function buildWorld(chart: SeaChart): World {
   const byId = new Map<string, Isl>()
-  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page, short], n) => {
+  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page, short, viewName], n) => {
     const [handle, name] = chart.people[p] ?? [null, null]
     const seed = hash(id)
     const isl = {
@@ -173,6 +175,7 @@ function buildWorld(chart: SeaChart): World {
       page: page ?? -1 - n,
       view: -1,
       short: short?.trim() || null,
+      viewName: viewName?.trim() || null,
       label: '',
     } as unknown as Isl
     byId.set(id, isl)
@@ -239,9 +242,9 @@ function buildWorld(chart: SeaChart): World {
   for (const members of groups.values()) {
     const root = members[0]!
     const inGroup = new Set(members)
-    // a group of one is named for its isle (its short title), and the isle itself then needs no label
-    const fam: Fam = { name: members.length > 1 ? viewName(members) : (root.short ?? shortOf(root.title)), root, members, shoals: [], x: 0, y: 0, R: 0 }
-    for (const m of members) m.label = members.length > 1 ? (m.short ?? shortOf(detailOf(m.title, fam.name))) : ''
+    // the group is named for its format (what kind of page), the isles for their content
+    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0 }
+    for (const m of members) m.label = m.short ?? shortOf(fam.name ? detailOf(m.title, fam.name) : m.title)
     for (const m of members) { m.fam = fam; m.lk = []; m.ld = 0 }
     for (const m of members) if (m !== root) (m.parent && inGroup.has(m.parent) ? m.parent : root).lk.push(m)
     const depth = (n: Isl, d: number) => { n.ld = d; for (const k of n.lk) depth(k, d + 1) }
@@ -342,6 +345,19 @@ function kin(w: World, m: Isl) {
   return { view, data }
 }
 
+/** "Discourse map" -> "Discourse maps", "Reply analysis" -> "Reply analyses": a group of a kind of page is plural. */
+export function plural(name: string): string {
+  const m = /^(.*?)([A-Za-z]+)(\W*)$/.exec(name.trim())
+  if (!m) return name
+  const [, head, w, tail] = m
+  const lower = w!.toLowerCase()
+  const irregular: Record<string, string> = { analysis: 'analyses', thesis: 'theses', index: 'indexes', person: 'people', child: 'children', data: 'data', series: 'series', news: 'news' }
+  let p = irregular[lower] ?? (/[^aeiou]y$/.test(lower) ? w!.slice(0, -1) + 'ies' : /(s|x|z|ch|sh)$/.test(lower) ? w + 'es' : w + 's')
+  if (w === w!.toUpperCase() && w!.length > 1) p = p.toUpperCase()
+  else if (irregular[lower] && w![0] === w![0]!.toUpperCase()) p = p[0]!.toUpperCase() + p.slice(1)
+  return head + p + tail
+}
+
 /** A title without its group's name: "Discourse map: Bike assault" in "Discourse map" is "Bike assault"; "Who Runs Kennewick" in "Who Runs" is "Kennewick". */
 function detailOf(title: string, group: string): string {
   const t = title.trim()
@@ -372,6 +388,15 @@ function shortOf(text: string): string {
  * else its first isle's title.
  */
 function viewName(members: Isl[]): string {
+  const declared = new Map<string, number>()
+  for (const m of members) if (m.viewName) declared.set(m.viewName, (declared.get(m.viewName) ?? 0) + 1)
+  const said = [...declared].sort((a, b) => b[1] - a[1])[0]
+  if (said) return said[0]
+  if (members.length === 1) {
+    // a lone page with no declared format: only a format its title spells out ("… — concept map"), else unnamed
+    const kind = /\s[—–-]\s([^—–-]{3,30})$/.exec(members[0]!.title)?.[1]?.trim()
+    return kind ? kind[0]!.toUpperCase() + kind.slice(1) : ''
+  }
   const heads = members.map((m) => (/^(.{3,40}?):\s/.exec(m.title)?.[1] ?? '').trim()).filter(Boolean)
   const counts = new Map<string, number>()
   for (const h of heads) counts.set(h, (counts.get(h) ?? 0) + 1)
@@ -839,12 +864,13 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   // each view's group is named over its shelf, the way a chart names an island group
   ctx.font = `italic 600 12px ${t.font}`
   for (const f of fams) {
+    if (!f.name) continue
     const top = f.members.reduce((a, m) => (m.y - m.r < a.y - a.r ? m : a), f.members[0]!)
     const cx = f.members.reduce((t2, m) => t2 + m.x, 0) / f.members.length
     const x = sx(cx)
     const y = sy(top.y) - top.r * k * 2.3 - 8
     if (f.R * k < (f.members.length > 1 ? 40 : 22) || y < 14 || y > H || x < -100 || x > W + 100) continue
-    const label = trim(f.name.toUpperCase(), 40)
+    const label = trim(plural(f.name).toUpperCase(), 40)
     const spaced = label.split('').join('\u2009')
     const tw = ctx.measureText(spaced).width
     if (!free(x - tw / 2, y - 12, x + tw / 2, y + 4)) continue
@@ -1042,7 +1068,9 @@ function Sea({ world }: { world: World }) {
         // a bank wider than the screen is just the water you're in; its name is written on it instead
         const big = Math.max(s.rx, s.ry) * v.k
         if (big < 10 || big > Math.min(w, h) * 0.45) continue
-        if (((s.x - x) / s.rx) ** 2 + ((s.y - y) / s.ry) ** 2 < 0.8) return { shoal: s }
+        // the data under an island belongs to it: hovering it is hovering the nearest island on it
+        if (((s.x - x) / s.rx) ** 2 + ((s.y - y) / s.ry) ** 2 < 0.8 && s.users.length)
+          return { isle: s.users.reduce((a, u) => (Math.hypot(u.x - x, u.y - y) < Math.hypot(a.x - x, a.y - y) ? u : a), s.users[0]!) }
       }
       return null
     },

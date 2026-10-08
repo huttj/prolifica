@@ -182,7 +182,8 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
     <div className="isle-page">
       <div className="isle-bar">
         <div className="grow" style={{ minWidth: 200 }}>
-          <h1 className="ellipsis">{i.title}</h1>
+          {i.viewName && <div className="isle-kind">{i.viewName}</div>}
+          <h1 className="ellipsis" title={i.title}>{withoutKind(i.title, i.viewName)}</h1>
           <div className="sub">
             <span>by <PersonLink person={i.owner} /></span>
             <button className="chip" style={{ cursor: 'pointer' }} onClick={() => setTab('history')} title="Version history">
@@ -349,6 +350,13 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
       {family && <EvolutionModal id={i.id} onClose={() => navigate(`/i/${i.id}`, { replace: true })} />}
     </div>
   )
+}
+
+/** The title without its kind repeated in front of it ("Discourse map: Bike assault" under "Discourse map"). */
+function withoutKind(title: string, kind: string | null): string {
+  if (!kind) return title
+  const k = kind.trim().toLowerCase()
+  return title.toLowerCase().startsWith(k) && /^[\s:—–\-|·]+/.test(title.slice(k.length)) ? title.slice(k.length).replace(/^[\s:—–\-|·]+/, '') || title : title
 }
 
 const VISIBILITY_LABEL: Record<Visibility, string> = { public: 'Public', unlisted: 'Unlisted', private: 'Private' }
@@ -816,13 +824,15 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
 function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () => void; onChanged: () => void }) {
   const { toast } = useSession()
   const [title, setTitle] = useState(isle.title)
+  const [shortTitle, setShortTitle] = useState(isle.shortTitle ?? '')
+  const [viewName, setViewName] = useState(isle.viewName ?? '')
   const [description, setDescription] = useState(isle.description ?? '')
   const [visibility, setVisibility] = useState<Visibility>(isle.visibility)
   const [busy, setBusy] = useState(false)
   const save = async () => {
     setBusy(true)
     try {
-      await api.updateIsle(isle.id, { title, description, visibility })
+      await api.updateIsle(isle.id, { title, description, visibility, shortTitle: shortTitle.trim() || null, viewName: viewName.trim() || null })
       toast(visibility === isle.visibility ? 'Saved' : `Now ${VISIBILITY_LABEL[visibility].toLowerCase()}`)
       onChanged()
       onClose()
@@ -857,6 +867,16 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
       )}
       <label className="lbl">Title</label>
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+        <div className="grow" style={{ minWidth: 160 }}>
+          <label className="lbl">Short title <span className="muted">(for the map)</span></label>
+          <input className="field" value={shortTitle} maxLength={40} placeholder="e.g. Matchmaker rejection" onChange={(e) => setShortTitle(e.target.value)} />
+        </div>
+        <div className="grow" style={{ minWidth: 160 }}>
+          <label className="lbl">Kind of page <span className="muted">(its group)</span></label>
+          <input className="field" value={viewName} maxLength={40} placeholder="e.g. Discourse map" onChange={(e) => setViewName(e.target.value)} />
+        </div>
+      </div>
       <label className="lbl">Description</label>
       <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
       <div className="row" style={{ marginTop: 14 }}>

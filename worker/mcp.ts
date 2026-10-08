@@ -101,7 +101,9 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   isle/version the change came from, with the same part names.
 - view: "same" or "new" whenever you pass html with a parent (see above).
 - short_title: one to three words for the map, naming what's particular to this isle ("Kennewick",
-  "Bike assault"), not the kind of page — the map names each group of same-view isles already.
+  "Bike assault"): its content.
+- view_name: what kind of page it is ("Discourse map", "City guide"): its format, which names its group
+  on the map. Give it when you make a new page; a rebind inherits it.
 - When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
   fixed something small; it is the same view) or view: "new" (it looks or works differently). If you
   don't say, a near-identical page counts as the same view.
@@ -313,6 +315,7 @@ const TOOLS = [
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
       title: s('Title'),
       short_title: s('One to three words for the map, naming what is particular to this one ("Kennewick", "Bike assault", "OpenAI firings"): the map already shows what kind of page it is'),
+      view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s; give it for a new page or when a remix makes a different kind of page.'),
       description: s('What it shows and what data shape it expects'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
       bindings: { type: 'object', description: 'Slot name -> dataset id', additionalProperties: { type: 'string' } },
@@ -679,6 +682,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         drawsFrom: drawsOf(args.draws_from),
         changes: changesOf(args.changes),
         shortTitle: typeof args.short_title === 'string' ? args.short_title : undefined,
+        viewName: typeof args.view_name === 'string' ? args.view_name : undefined,
       })
       shootLater(ctx, env, isle.id, islesOrigin(request, env))
       const unbound = Object.entries(isle.bindings).filter(([, d]) => !d).map(([k]) => k)
