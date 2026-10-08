@@ -720,18 +720,6 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   ctx.beginPath()
   for (const m of shown) if (m.parent && m.relation !== 'rebind' && (m.parent.r * k >= 1.6)) link(m.parent, m)
   bar(false)
-  // same data: a dotted line between groups whose data comes from the same original source
-  const dots = (strong: boolean) => {
-    ctx.strokeStyle = t.bankInk
-    ctx.globalAlpha = strong ? 0.95 : 0.5
-    ctx.lineWidth = strong ? 2.4 : 1.8
-    ctx.lineCap = 'round'
-    ctx.setLineDash([0.1, strong ? 6 : 7])
-    ctx.stroke()
-    ctx.setLineDash([])
-    ctx.lineCap = 'butt'
-    ctx.globalAlpha = 1
-  }
 
 
   ctx.fillStyle = t.deep
@@ -794,11 +782,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       for (const [a, b] of line) link(a, b)
       bar(true)
     }
-    if (data.length) {
-      ctx.beginPath()
-      for (const o of data) link(m, o)
-      dots(true)
-    }
+
   }
   if (hover) {
     ctx.strokeStyle = t.accent
@@ -808,12 +792,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       ctx.stroke(S[shape]!)
     }
     if (hover.isle) {
+      // just the island: its data stays unmarked (an isle can show dozens of datasets)
       const m = hover.isle
-      ctx.strokeStyle = t.bankInk
-      for (const d of m.data) {
-        const s = w.shoalAt[d]
-        if (s) outline(s.shape, sx(s.x), sy(s.y), Math.max(s.rx * k, 4), Math.max(s.ry * k, 4))
-      }
       ctx.strokeStyle = t.accent
       outline(m.shape, sx(m.x), sy(m.y), Math.max(m.r * k * 1.1, 3))
     } else {
@@ -1233,9 +1213,6 @@ function Sea({ world }: { world: World }) {
           <span className="kin-key static" title="Isles that run the same page, whatever data they show, stand together on one shelf">
             <b className="shelf-key" /><span>Same view<small>{world.views.length ? ` · ${world.views.length} shared` : ' · none shared yet'}</small></span>
           </span>
-          <span className="kin-key static" title="Hover an isle to see which others draw on the same original data">
-            <b className="bar-key" /><span>Same data<small> · on hover</small></span>
-          </span>
         </div>
         <div className="legend">
           <span><b className="remix-key" />remixed (a new look)</span>
@@ -1352,7 +1329,7 @@ function Kin({ world, m }: { world: World; m: Isl }) {
   return (
     <div className="kin tiny">
       {view.length > 0 && <div><b className="shelf-key" /><span><b>Same view as {view.length}:</b> {names(view)}</span></div>}
-      {data.length > 0 && <div><b className="bar-key" /><span><b>Same data as {data.length}:</b> {names(data)}</span></div>}
+      {data.length > 0 && <div><b className="bank-key" /><span><b>Same data as {data.length}:</b> {names(data)}</span></div>}
     </div>
   )
 }
