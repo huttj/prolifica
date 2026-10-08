@@ -563,10 +563,10 @@ function Notes(props: {
         </div>
       </div>
 
-      <div className="seg" style={{ marginBottom: 6, display: 'flex' }}>
+      <div className="seg layers" style={{ marginBottom: 6, display: 'flex' }}>
         {LAYERS.map((l) => (
-          <button key={l.id} className={layer === l.id ? 'on' : ''} style={{ flex: 1 }} onClick={() => setLayer(l.id)}>
-            {l.label} {marks ? <span className="tiny">{marks.layers[l.id]}</span> : null}
+          <button key={l.id} className={layer === l.id ? 'on' : ''} onClick={() => setLayer(l.id)} title={marks ? `${marks.layers[l.id]} comment${marks.layers[l.id] === 1 ? '' : 's'}` : undefined}>
+            {l.label}{marks && marks.layers[l.id] > 0 ? <span className="n">{marks.layers[l.id]}</span> : null}
           </button>
         ))}
       </div>

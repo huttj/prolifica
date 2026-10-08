@@ -149,6 +149,10 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 10px; overflow: hidden; background: var(--card); }
 .seg button { border: 0; background: transparent; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); }
 .seg button.on { background: var(--accent-soft); color: var(--accent); }
+/* comment layers sit in a narrow sidebar: each stays on one line */
+.seg.layers button { flex: 1 1 auto; white-space: nowrap; min-width: 0; padding: 6px 6px; display: inline-flex; align-items: center; justify-content: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; }
+.seg.layers .n { font-size: 11px; font-weight: 700; min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--bg-2); color: var(--ink-2); line-height: 16px; }
+.seg.layers button.on .n { background: var(--card); color: var(--accent); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .isle-card { display: flex; flex-direction: column; overflow: hidden; text-decoration: none; transition: transform 0.12s, box-shadow 0.12s; }
