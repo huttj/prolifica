@@ -765,6 +765,13 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.fillStyle = t.deep
     ctx.fillRect(0, 0, W, H)
     ctx.globalAlpha = 1
+    // the sand it stands on: the banks of its own data that lie under it (in its group), brightened, no outlines
+    const under = m.data.map((d) => w.shoalAt[d]).filter((sh): sh is Shoal => !!sh && sh.users[0]?.fam === m.fam)
+    if (under.length) {
+      ctx.fillStyle = t.sand
+      for (const sh of under) { ctx.globalAlpha = 0.85; blob(sh.shape, sx(sh.x), sy(sh.y), Math.max(sh.rx * k, 4), Math.max(sh.ry * k, 4)) }
+      ctx.globalAlpha = 1
+    }
     for (const o of lit) {
       if (o.r * k < 1.6) continue
       ctx.fillStyle = t.sand
