@@ -589,7 +589,6 @@ function readTheme(el: Element): Theme {
   }
 }
 
-export interface Layers { views: boolean; data: boolean }
 
 type Target = { isle: Isl; shoal?: undefined } | { shoal: Shoal; isle?: undefined }
 
@@ -617,7 +616,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number, ma
   })
 }
 
-function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: number; h: number; dpr: number }, t: Theme, hover: Target | null, layers: Layers) {
+function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: number; h: number; dpr: number }, t: Theme, hover: Target | null) {
   const { w: W, h: H, dpr } = size
   const S = shapes()
   const k = v.k
@@ -697,7 +696,6 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
 
   base()
   // kinship: sandbars from a remix to where it came from, dotted lines between groups on the same data
-  const onScreen = (a: Isl, b: Isl) => Math.max(a.x, b.x) > x0 && Math.min(a.x, b.x) < x1 && Math.max(a.y, b.y) > y0 && Math.min(a.y, b.y) < y1
   const link = (a: Isl, b: Isl) => {
     const ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y), d = Math.hypot(bx - ax, by - ay)
     if (d < 4) return
@@ -734,24 +732,34 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.lineCap = 'butt'
     ctx.globalAlpha = 1
   }
-  if (layers.data && w.dataLinks.length) {
-    ctx.beginPath()
-    for (const [a, b] of w.dataLinks) if (onScreen(a, b)) link(a, b)
-    dots(false)
-  }
 
+
+  ctx.fillStyle = t.deep
+  for (const m of shown) {
+    const h = heightOf(m.stars)
+    if (h < 2) continue
+    ctx.globalAlpha = 0.08 * h
+    blob(m.shape, sx(m.x) + m.r * k * 0.12 * h, sy(m.y) + m.r * k * 0.16 * h, m.r * k * 1.08)
+  }
+  ctx.globalAlpha = 1
   ctx.fillStyle = t.sand
   for (const m of shown) blob(m.shape, sx(m.x), sy(m.y), m.r * k * 1.1)
   for (const m of shown) {
     ctx.fillStyle = t.lands[m.tint]!
     blob(m.shape, sx(m.x), sy(m.y), m.r * k)
   }
-  ctx.fillStyle = t.hill
+  // height is how much it's been starred: an unstarred island is flat; each doubling of stars adds a
+  // terrace, smaller and darker, up to a summit (size, meanwhile, is how many remixes grew from it)
   for (const m of shown) {
     const r = m.r * k
-    if (r < 8) continue
-    blob((m.shape + 7) % 32, sx(m.x) + r * 0.12 * ((m.seed % 3) - 1), sy(m.y) - r * 0.1, r * 0.45)
-    if (m.stars > 2 && r > 16) blob((m.shape + 13) % 32, sx(m.x) - r * 0.28, sy(m.y) + r * 0.2, r * 0.22)
+    const levels = heightOf(m.stars)
+    if (!levels || r < 6) continue
+    const ox = r * 0.1 * ((m.seed % 3) - 1), oy = -r * 0.08
+    for (let l = 1; l <= levels; l++) {
+      ctx.fillStyle = mix(t.lands[m.tint]!, t.hill, Math.min(1, 0.35 + l * 0.22))
+      blob((m.shape + 7 * l) % 32, sx(m.x) + ox * l * 0.6, sy(m.y) + oy * l * 0.6, r * (0.78 - l * 0.11))
+    }
+    if (levels >= 3 && r > 10) { ctx.fillStyle = t.ink; ctx.globalAlpha = 0.55; blob(0, sx(m.x) + ox * levels * 0.6, sy(m.y) + oy * levels * 0.6, Math.max(1.5, r * 0.05)); ctx.globalAlpha = 1 }
   }
 
   // what the pointer is on: everything else washes out; its kin come back, joined to it
@@ -879,19 +887,17 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.fillText(spaced, x, y)
     ctx.globalAlpha = 1
   }
-  // close in, the sandbanks are named, the way a chart names its waters
-  ctx.font = `italic 500 11px ${t.font}`
-  for (const f of fams)
-    for (const s of f.shoals) {
-      if (!s.name || s.rx * k < 70) continue
-      const x = sx(s.x)
-      const y = sy(s.y) + s.ry * k * 0.82
-      const label = trim(s.name, 32)
-      const tw = ctx.measureText(label).width
-      if (!free(x - tw / 2, y - 10, x + tw / 2, y + 3)) continue
-      ctx.fillStyle = t.bankInk
-      ctx.fillText(label, x, y)
-    }
+}
+
+/** Terraces for an island's stars: 0 → flat, 1 → 1, 2–3 → 2, 4–7 → 3, … up to 6. */
+const heightOf = (stars: number) => (stars > 0 ? Math.min(6, Math.floor(Math.log2(stars)) + 1) : 0)
+
+/** Blend two #rrggbb colours (t: 0 → a, 1 → b); anything else falls back to b. */
+function mix(a: string, b: string, t: number) {
+  const p = (c: string) => (/^#[0-9a-f]{6}$/i.test(c) ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : null)
+  const A = p(a), B = p(b)
+  if (!A || !B) return b
+  return '#' + A.map((v, i) => Math.round(v + (B[i]! - v) * t).toString(16).padStart(2, '0')).join('')
 }
 
 // ---- the page ----
@@ -915,9 +921,6 @@ function Sea({ world }: { world: World }) {
   const hoverRef = useRef<Target | null>(null)
   const [hover, setHoverState] = useState<Target | null>(null)
   const [pinned, setPinned] = useState(false)
-  const [layers, setLayers] = useState<Layers>({ views: true, data: true })
-  const layersRef = useRef(layers)
-  layersRef.current = layers
   const [, setTick] = useState(0)
   const frame = useRef(0)
   const flight = useRef(0)
@@ -927,13 +930,12 @@ function Sea({ world }: { world: World }) {
     frame.current = 0
     const c = canvas.current
     if (!c || !theme.current || !size.current.w) return
-    render(c.getContext('2d')!, world, view.current, size.current, theme.current, hoverRef.current, layersRef.current)
+    render(c.getContext('2d')!, world, view.current, size.current, theme.current, hoverRef.current)
     if (hoverRef.current) setTick((n) => n + 1)
   }, [world])
   const redraw = useCallback(() => {
     if (!frame.current) frame.current = requestAnimationFrame(draw)
   }, [draw])
-  useEffect(() => redraw(), [layers, redraw])
   const setHover = useCallback(
     (t: Target | null) => {
       const same = t?.isle ? t.isle === hoverRef.current?.isle : t?.shoal ? t.shoal === hoverRef.current?.shoal : !hoverRef.current
@@ -1225,19 +1227,20 @@ function Sea({ world }: { world: World }) {
       <div className="sea-title card">
         <h1>The archipelago</h1>
         <p className="small muted">
-          {world.isles.length.toLocaleString()} isle{world.isles.length === 1 ? '' : 's'} on {families.toLocaleString()} view{families === 1 ? '' : 's'}. Isles that share a view stand together on one shelf; sandbars run to remixes that changed the look; sandbanks are the data they show. Hover an isle to see its kin.
+          {world.isles.length.toLocaleString()} isle{world.isles.length === 1 ? '' : 's'} on {families.toLocaleString()} view{families === 1 ? '' : 's'}. Isles that share a view stand together on one shelf. Bigger islands have more remixes; higher ones, more stars. Hover an isle to see its kin.
         </p>
         <div className="kin-keys">
           <span className="kin-key static" title="Isles that run the same page, whatever data they show, stand together on one shelf">
             <b className="shelf-key" /><span>Same view<small>{world.views.length ? ` · ${world.views.length} shared` : ' · none shared yet'}</small></span>
           </span>
-          <button className="kin-key" aria-pressed={layers.data} onClick={() => setLayers((l) => ({ ...l, data: !l.data }))} title="Isles whose data comes from the same original source are joined by a dotted sandbar">
-            <b className="bar-key" /><span>Same data<small>{` · ${[...world.bySource.values()].filter((u) => u.length > 1).length || 'none yet'}`}{[...world.bySource.values()].some((u) => u.length > 1) ? ' shared' : ''}</small></span>
-          </button>
+          <span className="kin-key static" title="Hover an isle to see which others draw on the same original data">
+            <b className="bar-key" /><span>Same data<small> · on hover</small></span>
+          </span>
         </div>
         <div className="legend">
           <span><b className="remix-key" />remixed (a new look)</span>
-          <span><b className="bank-key" />data</span>
+          <span><b className="bank-key" />more sand, more data</span>
+          <span><b className="hill-key" />higher, more stars</span>
         </div>
       </div>
       <SeaSearch world={world} onPick={goTo} />
@@ -1323,7 +1326,6 @@ function HoverCard({ target, world, view, size, pinned, onOpen }: { target: Targ
     )
   }
   const m = target.isle
-  const data = m.data.map((d) => world.shoalAt[d]).filter((s): s is Shoal => !!s)
   return (
     <div className="sea-card card" style={style}>
       <div className="sea-thumb"><Thumb src={m.shotUrl} title={m.title} /></div>
@@ -1335,13 +1337,7 @@ function HoverCard({ target, world, view, size, pinned, onOpen }: { target: Targ
           <span className="grow" />
           {m.stars > 0 && <span className="stars"><Icon name="star" filled /> {m.stars}</span>}
         </div>
-        {(m.descendants > 0 || data.length > 0) && (
-          <div className="tiny muted" style={{ marginTop: 4 }}>
-            {m.descendants > 0 && <>{m.descendants} remix{m.descendants === 1 ? '' : 'es'} grew from it</>}
-            {m.descendants > 0 && data.length > 0 && ' · '}
-            {data.length > 0 && <>on {data.map((s) => s.name ?? 'private data').join(', ')}</>}
-          </div>
-        )}
+        {m.descendants > 0 && <div className="tiny muted" style={{ marginTop: 4 }}>{m.descendants} remix{m.descendants === 1 ? '' : 'es'} grew from it</div>}
         <Kin world={world} m={m} />
         {pinned && <button className="btn sm primary" style={{ marginTop: 8 }} onClick={onOpen}>Open isle</button>}
       </div>

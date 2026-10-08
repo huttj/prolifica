@@ -379,6 +379,7 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .kin > div { display: flex; gap: 6px; align-items: baseline; }
 .kin > div > b:first-child { position: relative; top: 1px; }
 .kin span b { color: var(--ink); font-weight: 600; }
+.hill-key { display: inline-block; width: 14px; height: 10px; border-radius: 50% 50% 40% 40%; background: radial-gradient(circle at 50% 45%, var(--hill) 0 35%, var(--land-1) 36% 70%, var(--sand) 71%); vertical-align: middle; margin-right: 4px; }
 .bank-key { display: inline-block; width: 14px; height: 9px; border-radius: 5px; background: var(--sand); opacity: 0.8; vertical-align: middle; margin-right: 4px; }
 .sea-search { position: absolute; top: 14px; right: 14px; width: min(300px, calc(100% - 28px)); }
 .sea-search .field { width: 100%; box-shadow: var(--shadow); }
