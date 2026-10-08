@@ -513,3 +513,15 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .evo-changes li { margin: 2px 0; }
 .evo-draws { margin-top: 8px; color: var(--ink-2); }
 .evo-draws code, .evo-changes code { font-size: 11.5px; }
+
+/* where an isle's data came from */
+.sources { margin-top: 12px; }
+.src-flag { font-size: 11px; font-weight: 700; color: #9a5b00; background: #fdf0d5; padding: 1px 8px; border-radius: 999px; }
+@media (prefers-color-scheme: dark) { .src-flag { color: #f2c46a; background: #3a2c10; } }
+.src-card { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: var(--card); margin-top: 6px; }
+.src-card.self { border-color: #e2b85a; box-shadow: inset 3px 0 0 #e2b85a; }
+.src-notes summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
+.src-notes p { margin: 4px 0 0; white-space: pre-wrap; color: var(--ink-2); max-height: 160px; overflow: auto; }
+.src-collector { margin-top: 8px; padding: 9px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--line-2); }
+.bookmarklet { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 13px; text-decoration: none; cursor: grab; white-space: nowrap; }
+.src-code { margin: 8px 0 0; max-height: 220px; overflow: auto; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }

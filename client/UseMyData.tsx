@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react'
-import type { Dataset, Isle } from '../shared/types'
+import type { Dataset, Isle, IsleSources } from '../shared/types'
 import { api } from './api'
 import { AskAiButton } from './ask'
+import { DataSources } from './Sources'
 import { Icon, Link, Modal, useAsync, useSession } from './ui'
 
 /**
@@ -12,7 +13,7 @@ import { Icon, Link, Modal, useAsync, useSession } from './ui'
 
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 
-export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, notes: string, origin: string) {
+export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, notes: string, origin: string, sources?: IsleSources) {
   const url = `${origin}/i/${isle.id}`
   const lines: string[] = []
   lines.push(`Using the Prolifica connector, make my own version of the isle "${isle.title}" (${isle.id}, ${url}) that shows my data instead of its own.`)
@@ -25,6 +26,11 @@ export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, n
   if (fetchWhat) {
     lines.push(`${picked.length ? '   Also collect' : '2. Collect'} this data: ${fetchWhat}`)
     lines.push(`   Before collecting from a website, call site with its URL and reuse a collector that has worked there. Save what you collect with write_data, with its source (url, method, notes, and the code you used).`)
+  }
+  if (sources?.sources.length) {
+    const by = sources.sources.map((s) => `${s.dataset.path} (id ${s.dataset.id}${s.site ? `, from ${s.site}` : ''}${s.method ? `, ${s.method}` : ''}${s.code ? ', collector saved with it' : ''})`).join('; ')
+    lines.push(`   For reference, this isle's own data came from: ${by}. Read the original's source notes (read_data) to see what shape it arrived in.`)
+    if (sources.sources.some((s) => s.selfServe)) lines.push(`   Some of it was collected in a browser (a bookmarklet or extension), which only I can run: if I haven't given you that data, ask me to collect it and send you the file rather than trying to fetch it yourself.`)
   }
   lines.push(`3. Fit it to the slots. If a dataset isn't already in the shape a slot expects, write a transformed copy with write_data (derived_from the originals, transform saying what you did) and bind that. Never overwrite my originals. If something the page needs isn't in my data at all, tell me instead of inventing it.`)
   lines.push(`4. Publish with publish_isle, parent: "${isle.id}" and from: "${isle.id}" plus the new bindings (same page, my data). If the page has words tied to its original data written into it (a place name, a title), don't fork it just to change them: put them in the data and have the page read them. Only if my data can't be made to fit the page as it is, pass new html instead, changing as little as possible, with view: "same" if it's still the same view or "new" if it now looks or works differently.`)
@@ -77,7 +83,8 @@ export function UseMyDataModal({ isle, onClose }: { isle: Isle; onClose: () => v
 
   const slots = Object.entries(isle.slots)
   const ready = picked.length > 0 || fetchWhat.trim().length > 0
-  const prompt = myDataPrompt(isle, picked, fetchWhat.trim(), notes.trim(), location.origin)
+  const srcs = useAsync(() => api.isleSources(isle.id), [isle.id])
+  const prompt = myDataPrompt(isle, picked, fetchWhat.trim(), notes.trim(), location.origin, srcs.data)
 
   return (
     <Modal onClose={onClose} wide>
@@ -107,6 +114,8 @@ export function UseMyDataModal({ isle, onClose }: { isle: Isle; onClose: () => v
             ))}
           </details>
         )}
+
+        <DataSources isle={isle} compact />
 
         {!me ? (
           <p className="small" style={{ marginTop: 16 }}><Link to={`/login?next=${encodeURIComponent(location.pathname)}`}>Sign in</Link> to use your own data.</p>

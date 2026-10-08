@@ -2,7 +2,7 @@ import { classifyRelation, pageChanges, pageSimilarity, type Relation } from '..
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
-  Anchor, AnchorState, CollectionMethod, DataDelta, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
+  Anchor, AnchorState, CollectionMethod, DataDelta, IsleSource, IsleSources, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
 } from '../shared/types'
 import { islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
@@ -691,6 +691,53 @@ export class Store {
       return this.blobText(old!.source_blob)
     }
     return this.blobText(row.source_blob)
+  }
+
+  private async blobSize(hash: string): Promise<number> {
+    return (await this.d1.prepare('SELECT size FROM blobs WHERE hash = ?').bind(hash).first<{ size: number }>())?.size ?? 0
+  }
+
+  /** The original data behind each of an isle's slots (following derived-from up), and how each was collected. */
+  async isleSources(id: string): Promise<IsleSources> {
+    const row = await this.visibleIsleRow(id)
+    const bindings = parseJson<Record<string, string>>(row.bindings, {})
+    const slotsOf = new Map<string, string[]>()
+    for (const [slot, did] of Object.entries(bindings)) {
+      const { results } = await this.d1
+        .prepare(
+          `WITH RECURSIVE up(id, depth) AS (
+             SELECT ?, 0
+             UNION
+             SELECT e.dst_id, up.depth + 1 FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset' WHERE up.depth < 24
+           )
+           SELECT DISTINCT up.id FROM up WHERE NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')`,
+        )
+        .bind(did)
+        .all<{ id: string }>()
+      for (const r of results.length ? results : [{ id: did }]) (slotsOf.get(r.id) ?? slotsOf.set(r.id, []).get(r.id)!).push(slot)
+    }
+    const sources: IsleSource[] = []
+    for (const [did, slots] of slotsOf) {
+      const d = await this.datasetRow(did)
+      if (!d) continue
+      const readable = this.canReadDataset(d)
+      const method = (d.source_method as CollectionMethod | null) ?? null
+      const language = d.source_code_lang ?? null
+      sources.push({
+        dataset: await this.toDatasetRef(d),
+        slots,
+        method,
+        url: readable ? d.source_url : null,
+        site: d.source_site ?? null,
+        notes: readable ? d.source_notes : null,
+        collectedAt: d.collected_at,
+        code: readable && d.source_code ? { hash: d.source_code, size: await this.blobSize(d.source_code), language } : null,
+        selfServe: method === 'bookmarklet' || method === 'extension' || method === 'userscript' || /bookmarklet|userscript/i.test(language ?? ''),
+      })
+    }
+    const wanted = new Set(sources.map((s) => s.site).filter((s): s is string => !!s))
+    const sites = wanted.size ? (await this.sites(500)).filter((x) => wanted.has(x.site)) : []
+    return { sources, sites }
   }
 
   /**

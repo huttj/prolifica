@@ -6,6 +6,7 @@ import { AskAiButton, AskPopover, changesPrompt, type ChangeNote, useChangeNotes
 import { Legend, ThreadView } from './Tree'
 import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
+import { DataSources } from './Sources'
 import {
   EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, RelationChip, SizedFrame, useAsync, useSession,
 } from './ui'
@@ -776,6 +777,7 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
           <div><button className="btn primary sm" onClick={onUseData}><Icon name="data" /> Use my data…</button></div>
         </div>
       )}
+      <DataSources isle={isle} />
       <div>
         <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Slots</div>
         {slots.length === 0 && <p className="small muted">This isle reads no data.</p>}

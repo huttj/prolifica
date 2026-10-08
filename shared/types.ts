@@ -238,6 +238,28 @@ export interface SeaChart {
   isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?, (string | null)?, (string | null)?][]
 }
 
+/** Where an isle's data came from: the original data behind each slot, and how it was collected. */
+export interface IsleSource {
+  dataset: DatasetRef
+  /** the isle's slots this original data feeds (directly or through data derived from it) */
+  slots: string[]
+  method: CollectionMethod | null
+  url: string | null
+  site: string | null
+  notes: string | null
+  collectedAt: number | null
+  /** the collector itself, when one was recorded (fetch it from /api/collectors/<hash>) */
+  code: { hash: string; size: number; language: string | null } | null
+  /** collected in a browser by the person (bookmarklet, extension, userscript): an AI can't fetch it for you */
+  selfServe: boolean
+}
+
+export interface IsleSources {
+  sources: IsleSource[]
+  /** what else Prolifica knows about each site the data came from */
+  sites: SiteSummary[]
+}
+
 /** How one step in a family's history differs from the one before it. */
 export interface PageDelta {
   /** 0..1; 1 means the same page */

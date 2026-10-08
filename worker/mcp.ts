@@ -588,6 +588,8 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         remixes: isle.childCount,
         uses: isle.uses.map((u) => ({ isle: u.isle.id, title: u.isle.title, selector: u.selector, label: u.label })),
         versions: (await store.versions(id)).map((v) => ({ version: v.version, note: v.note, at: new Date(v.createdAt).toISOString() })),
+        // where its data came from: what someone making their own version will need to collect, and how
+        data_sources: (await store.isleSources(id)).sources.map((x) => ({ original: { id: x.dataset.id, path: x.dataset.path }, feeds: x.slots, site: x.site, method: x.method, has_collector: !!x.code, collected_by_person_in_browser: x.selfServe })),
       }
       const wantSlice = str(args.grep) || str(args.lines)
       if (wantSlice || args.source !== false) {
