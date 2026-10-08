@@ -193,6 +193,10 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .emoji-pop button:hover { background: var(--bg-2); }
 
 .compose { background: var(--card); border: 1px solid var(--accent-2); border-radius: 12px; padding: 10px; margin-bottom: 12px; }
+/* the chip shrinks (with an ellipsis) so the close button always stays in the top-right corner */
+.compose-head { flex-wrap: nowrap; align-items: flex-start; }
+.compose-head .anchor-chip { min-width: 0; flex: 0 1 auto; display: block; text-align: left; }
+.compose-x { flex: none; margin: -4px -4px 0 0; }
 .anchor-chip { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 6px; max-width: 100%; cursor: pointer; border: 0; }
 .comment { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .comment .head { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }

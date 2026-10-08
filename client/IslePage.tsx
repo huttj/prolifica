@@ -384,16 +384,17 @@ function Changes(props: {
         Point at pieces and say what should change. The list goes to your AI as one prompt, then it's forgotten: nothing here is saved or shown to anyone.
       </p>
       <div className="compose">
-        <div className="row" style={{ marginBottom: 8 }}>
+        <div className="row compose-head" style={{ marginBottom: 8 }}>
           {anchor ? (
             <>
               <button className="anchor-chip ellipsis" onClick={() => focusEl(anchor)} title={anchor.selector}>✎ {anchor.label || anchor.selector}</button>
-              <button className="btn ghost sm" onClick={() => setDraft(null)} title="About the whole isle instead"><Icon name="close" /></button>
+              <span className="grow" />
+              <button className="btn ghost sm compose-x" onClick={() => setDraft(null)} title="About the whole isle instead" aria-label="About the whole isle instead"><Icon name="close" /></button>
             </>
           ) : (
             <span className="small muted">About the whole isle</span>
           )}
-          <span className="grow" />
+          {!anchor && <span className="grow" />}
           {!anchor && (
             <button className={`btn sm ${picking ? 'on' : ''}`} onClick={() => (picking ? stopPicking() : startPicking())}>
               <Icon name="pick" /> {picking ? 'Click a piece…' : 'Pick a piece'}
@@ -522,13 +523,14 @@ function Notes(props: {
   return (
     <div>
       <div className="compose">
-        <div className="row" style={{ marginBottom: 8 }}>
+        <div className="row compose-head" style={{ marginBottom: 8 }}>
           {active ? (
             <>
               <button className="anchor-chip ellipsis" onClick={() => focusEl(active.anchor)} title={active.anchor.selector}>
                 ◎ {active.anchor.label || active.anchor.selector}
               </button>
-              <button className="btn ghost sm" onClick={() => setActive(null)} title="Back to the whole isle"><Icon name="close" /></button>
+              <span className="grow" />
+              <button className="btn ghost sm compose-x" onClick={() => setActive(null)} title="Back to the whole isle" aria-label="Back to the whole isle"><Icon name="close" /></button>
             </>
           ) : (
             <span className="small muted">On the whole isle · or <b>Mark a piece</b> to point at one part</span>
