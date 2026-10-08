@@ -73,9 +73,17 @@ data: it asks for it by slot name, so anyone can run their own data through it.
 
 ## Remixing (the point of the place)
 - Same page, new data: publish_isle with from=<isle> (or parent=<isle>) and new bindings,
-  no html. That's a "rebind".
+  no html. That's a "rebind", and it stands on the same island group as its parent.
 - Same data, new look: parent=<isle>, new html, keep bindings. That's a "restyle".
 - Both: parent=<isle>, new html, new bindings. A "remix".
+- A remix means a real change to how the page looks or works. If you only need different words in
+  the page for different data (a city's name, a title, a date range, a unit), don't fork the page to
+  swap them: those belong in the data. Make the page read them from a slot (a small "meta" JSON is
+  fine) — update the original in place if it's yours, otherwise publish that as a restyle — and then
+  rebind. The next person with their own data can then use the page as it is.
+- When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
+  fixed something small; it is the same view) or view: "new" (it looks or works differently). If you
+  don't say, a near-identical page counts as the same view.
 - Always pass parent when you build on someone's isle, and uses=[{isle, selector, label}] for
   the pieces you borrowed from elsewhere (starred elements especially). That is how the
   lineage trees get drawn and how credit flows.
@@ -246,6 +254,7 @@ const TOOLS = [
       visibility: s('public (default), unlisted, or private', { enum: ['public', 'unlisted', 'private'] }),
       id: s('Update this isle of yours in place (keeps the old version)'),
       note: s('For an update: what changed in this version (shown in its history)'),
+      view: s('With html and a parent: "same" if you only adapted the page to new data or fixed something small, "new" if it now looks or works differently. Decides whether it joins its parent\'s island group.', { enum: ['same', 'new'] }),
     }),
   },
   {
@@ -539,6 +548,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         uses: Array.isArray(args.uses) ? (args.uses as { isle: string; selector?: string; label?: string }[]).filter((u) => u && typeof u.isle === 'string') : undefined,
         visibility: str(args.visibility) as Visibility | undefined,
         note: str(args.note),
+        view: args.view === 'same' || args.view === 'new' ? args.view : undefined,
       })
       shootLater(ctx, env, isle.id, islesOrigin(request, env))
       const unbound = Object.entries(isle.bindings).filter(([, d]) => !d).map(([k]) => k)

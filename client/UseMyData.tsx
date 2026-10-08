@@ -27,7 +27,7 @@ export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, n
     lines.push(`   Before collecting from a website, call site with its URL and reuse a collector that has worked there. Save what you collect with write_data, with its source (url, method, notes, and the code you used).`)
   }
   lines.push(`3. Fit it to the slots. If a dataset isn't already in the shape a slot expects, write a transformed copy with write_data (derived_from the originals, transform saying what you did) and bind that. Never overwrite my originals. If something the page needs isn't in my data at all, tell me instead of inventing it.`)
-  lines.push(`4. Publish with publish_isle, parent: "${isle.id}" and from: "${isle.id}" plus the new bindings (same page, my data). Only if my data can't be made to fit the page as it is, pass new html instead, changing as little as possible.`)
+  lines.push(`4. Publish with publish_isle, parent: "${isle.id}" and from: "${isle.id}" plus the new bindings (same page, my data). If the page has words tied to its original data written into it (a place name, a title), don't fork it just to change them: put them in the data and have the page read them. Only if my data can't be made to fit the page as it is, pass new html instead, changing as little as possible, with view: "same" if it's still the same view or "new" if it now looks or works differently.`)
   lines.push(`5. Test it with check_isle on your new isle (and at width 390 for phones). If there are errors, a slot didn't load, or the page looks empty or wrong in the screenshot, fix it and update in place (publish_isle with id and a note), then check again until it's clean.`)
   if (notes) {
     lines.push('')

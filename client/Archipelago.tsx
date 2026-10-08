@@ -527,7 +527,6 @@ function readTheme(el: Element): Theme {
   }
 }
 
-const ROUTE: Record<string, string> = { rebind: '#6f8fe0', restyle: '#d36aa6', remix: '#d9a03a' }
 export interface Layers { views: boolean; data: boolean }
 
 type Target = { isle: Isl; shoal?: undefined } | { shoal: Shoal; isle?: undefined }
@@ -634,31 +633,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   ctx.fillStyle = t.shallow
   for (const m of shown) blob(m.shape, sx(m.x), sy(m.y), m.r * k * 1.4)
 
-  // routes from each isle to its remixes
   base()
-  ctx.lineWidth = 1.6
-  ctx.setLineDash([5, 4])
-  for (const m of shown) {
-    if (!m.parent) continue
-    const p = m.parent
-    const ax = sx(p.x)
-    const ay = sy(p.y)
-    const bx = sx(m.x)
-    const by = sy(m.y)
-    const d = Math.hypot(bx - ax, by - ay)
-    if (d < 6) continue
-    const ux = (bx - ax) / d
-    const uy = (by - ay) / d
-    const bend = (((m.seed >>> 3) % 2) * 2 - 1) * d * 0.12
-    ctx.strokeStyle = ROUTE[m.relation ?? ''] ?? t.muted
-    ctx.beginPath()
-    ctx.moveTo(ax + ux * p.r * k * 1.1, ay + uy * p.r * k * 1.1)
-    ctx.quadraticCurveTo((ax + bx) / 2 - uy * bend, (ay + by) / 2 + ux * bend, bx - ux * m.r * k * 1.1, by - uy * m.r * k * 1.1)
-    ctx.stroke()
-  }
-  ctx.setLineDash([])
-
-  // kinship: sandbars between families on the same data, a line in the group's colour between isles on the same page
+  // kinship: sandbars from a remix to where it came from, dotted lines between groups on the same data
   const onScreen = (a: Isl, b: Isl) => Math.max(a.x, b.x) > x0 && Math.min(a.x, b.x) < x1 && Math.max(a.y, b.y) > y0 && Math.min(a.y, b.y) < y1
   const link = (a: Isl, b: Isl) => {
     const ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y), d = Math.hypot(bx - ax, by - ay)
@@ -667,7 +643,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.moveTo(ax + ux * a.r * k * 1.25, ay + uy * a.r * k * 1.25)
     ctx.quadraticCurveTo((ax + bx) / 2 - uy * bend, (ay + by) / 2 + ux * bend, bx - ux * b.r * k * 1.25, by - uy * b.r * k * 1.25)
   }
-  // same data: a soft sandbar under the water, wide and faint so it blends into the sea
+  // where a remix came from: a soft sandbar under the water, wide and faint so it blends into the sea.
+  // (a rebind, same view with new data, needs no line: it stands on its parent's shelf)
   const bar = (strong: boolean) => {
     const wide = Math.max(5, Math.min(22, 9 * Math.sqrt(k)))
     ctx.lineCap = 'round'
@@ -680,10 +657,25 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.globalAlpha = 1
     ctx.lineCap = 'butt'
   }
+  ctx.beginPath()
+  for (const m of shown) if (m.parent && m.relation !== 'rebind' && (m.parent.r * k >= 1.6)) link(m.parent, m)
+  bar(false)
+  // same data: a dotted line between groups whose data comes from the same original source
+  const dots = (strong: boolean) => {
+    ctx.strokeStyle = t.bankInk
+    ctx.globalAlpha = strong ? 0.95 : 0.5
+    ctx.lineWidth = strong ? 2.4 : 1.8
+    ctx.lineCap = 'round'
+    ctx.setLineDash([0.1, strong ? 6 : 7])
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.lineCap = 'butt'
+    ctx.globalAlpha = 1
+  }
   if (layers.data && w.dataLinks.length) {
     ctx.beginPath()
     for (const [a, b] of w.dataLinks) if (onScreen(a, b)) link(a, b)
-    bar(false)
+    dots(false)
   }
 
   ctx.fillStyle = t.sand
@@ -709,6 +701,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     lit.add(m)
     for (const o of view) lit.add(o)
     for (const o of data) lit.add(o)
+    if (m.parent && m.relation !== 'rebind') lit.add(m.parent)
+    for (const kid of m.kids) if (kid.relation !== 'rebind') lit.add(kid)
     ctx.globalAlpha = 0.55
     ctx.fillStyle = t.deep
     ctx.fillRect(0, 0, W, H)
@@ -721,10 +715,19 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       blob(o.shape, sx(o.x), sy(o.y), o.r * k)
     }
     base()
+    // its remix lineage: where it came from and what grew from it, when the look changed
+    const line: [Isl, Isl][] = []
+    if (m.parent && m.relation !== 'rebind') line.push([m.parent, m])
+    for (const kid of m.kids) if (kid.relation !== 'rebind') line.push([m, kid])
+    if (line.length) {
+      ctx.beginPath()
+      for (const [a, b] of line) link(a, b)
+      bar(true)
+    }
     if (data.length) {
       ctx.beginPath()
       for (const o of data) link(m, o)
-      bar(true)
+      dots(true)
     }
   }
   if (hover) {
@@ -1154,7 +1157,7 @@ function Sea({ world }: { world: World }) {
       <div className="sea-title card">
         <h1>The archipelago</h1>
         <p className="small muted">
-          {world.isles.length.toLocaleString()} isle{world.isles.length === 1 ? '' : 's'} on {families.toLocaleString()} view{families === 1 ? '' : 's'}. Isles that share a view stand together on one shelf; routes lead to remixes; sandbanks are the data they show. Hover an isle to see its kin.
+          {world.isles.length.toLocaleString()} isle{world.isles.length === 1 ? '' : 's'} on {families.toLocaleString()} view{families === 1 ? '' : 's'}. Isles that share a view stand together on one shelf; sandbars run to remixes that changed the look; sandbanks are the data they show. Hover an isle to see its kin.
         </p>
         <div className="kin-keys">
           <span className="kin-key static" title="Isles that run the same page, whatever data they show, stand together on one shelf">
@@ -1165,9 +1168,7 @@ function Sea({ world }: { world: World }) {
           </button>
         </div>
         <div className="legend">
-          <span><i style={{ background: ROUTE.rebind }} />new data</span>
-          <span><i style={{ background: ROUTE.restyle }} />new look</span>
-          <span><i style={{ background: ROUTE.remix }} />remixed</span>
+          <span><b className="remix-key" />remixed (a new look)</span>
           <span><b className="bank-key" />data</span>
         </div>
       </div>

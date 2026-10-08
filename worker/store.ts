@@ -1,4 +1,4 @@
-import { classifyRelation, type Relation } from '../shared/relation'
+import { classifyRelation, pageSimilarity, type Relation } from '../shared/relation'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
@@ -119,6 +119,8 @@ export interface PublishInput {
   uses?: { isle: string; selector?: string; label?: string }[]
   visibility?: Visibility
   note?: string
+  /** what the publisher says changed in the page: 'same' view (adapted to new data, small fixes) or a 'new' one */
+  view?: 'same' | 'new'
   /** internal: put back a page this isle had before (restoring a version) */
   sourceBlob?: string
 }
@@ -734,7 +736,12 @@ export class Store {
     const title = (input.title ?? existing?.title ?? (parent ? `${parent.title} (remix)` : '')).trim()
     if (!title) fail(400, 'An isle needs a title')
     const description = input.description !== undefined ? input.description : (existing?.description ?? null)
-    const relation = parent && !existing ? classifyRelation({ source: parent.source_blob, bindings: parseJson(parent.bindings, {}) }, { source: sourceHash, bindings: bindingIds }) : (existing?.relation ?? null)
+    // the relation is settled when the remix is made, or again when its publisher says whether the view changed
+    let relation = existing?.relation ?? null
+    if (parent && (!existing || input.view)) {
+      const similarity = !input.view && sourceHash !== parent.source_blob ? pageSimilarity(await this.blobText(parent.source_blob), input.html ?? (await this.blobText(sourceHash))) : undefined
+      relation = classifyRelation({ source: parent.source_blob, bindings: parseJson(parent.bindings, {}) }, { source: sourceHash, bindings: bindingIds }, { view: input.view, similarity })
+    }
 
     const now = Date.now()
     const id = existing?.id ?? shortId()
@@ -753,7 +760,9 @@ export class Store {
           .prepare('UPDATE isles SET title = ?, description = ?, source_blob = ?, slots = ?, bindings = ?, visibility = ?, version = version + 1, note = ?, updated_at = ? WHERE id = ?')
           .bind(title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), visibility, input.note ?? null, now, id),
       ])
-    } else {
+    }
+    if (existing && relation !== existing.relation) await this.d1.prepare('UPDATE isles SET relation = ? WHERE id = ?').bind(relation, id).run()
+    if (!existing) {
       await this.d1
         .prepare(
           `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, created_at, updated_at)
