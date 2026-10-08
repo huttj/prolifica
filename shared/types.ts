@@ -231,3 +231,50 @@ export interface SeaChart {
    */
   isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?][]
 }
+
+/** How one step in a family's history differs from the one before it. */
+export interface PageDelta {
+  /** 0..1; 1 means the same page */
+  similarity: number
+  /** roughly how many lines (and CSS rules and tags) came and went */
+  added: number
+  removed: number
+}
+
+export interface DataDelta {
+  slot: string
+  /** dataset paths; null where the slot had no data */
+  from: string | null
+  to: string | null
+}
+
+export interface EvolutionStep {
+  version: number
+  /** what the publisher said changed (for version 1 of a remix: what it changed from its parent) */
+  note: string | null
+  createdAt: number
+  /** compared with the step before: the previous version, or for version 1 the parent as it was then */
+  page: PageDelta | null
+  data: DataDelta[]
+  title?: string
+}
+
+export interface EvolutionIsle {
+  isle: IsleSummary
+  parentId: string | null
+  /** which version of the parent it was made from */
+  parentVersion: number | null
+  depth: number
+  /** oldest first */
+  versions: EvolutionStep[]
+}
+
+/** A whole family, from the original down, for seeing how it evolved. */
+export interface Evolution {
+  rootId: string
+  focusId: string
+  /** depth-first from the root */
+  isles: EvolutionIsle[]
+  /** true when the family is bigger than what's shown */
+  truncated: boolean
+}

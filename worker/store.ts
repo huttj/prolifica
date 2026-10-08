@@ -1,8 +1,8 @@
-import { classifyRelation, pageSimilarity, type Relation } from '../shared/relation'
+import { classifyRelation, pageChanges, pageSimilarity, type Relation } from '../shared/relation'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
-  Anchor, AnchorState, CollectionMethod, DataKind, DataSource, Dataset, DatasetRef, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
+  Anchor, AnchorState, CollectionMethod, DataDelta, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
 } from '../shared/types'
 import { islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
@@ -662,9 +662,119 @@ export class Store {
     }
   }
 
-  async isleSource(id: string): Promise<string> {
+  async isleSource(id: string, version?: number): Promise<string> {
     const row = await this.visibleIsleRow(id)
+    if (version && version !== row.version) {
+      const old = await this.d1.prepare('SELECT source_blob FROM isle_versions WHERE isle_id = ? AND version = ?').bind(id, version).first<{ source_blob: string }>()
+      if (!old) fail(404, `This isle has no version ${version}`)
+      return this.blobText(old!.source_blob)
+    }
     return this.blobText(row.source_blob)
+  }
+
+  /**
+   * A whole family, from its original down, with every version of every isle and how each step differs
+   * from the one before it: each version from the previous one, and each remix's first version from its
+   * parent as the parent was when the remix was made.
+   */
+  async evolution(id: string, limit = 60): Promise<Evolution> {
+    const focus = await this.visibleIsleRow(id)
+    let root = focus
+    for (let i = 0; i < 50 && root.parent_id; i++) {
+      const p = await this.isleRow(root.parent_id)
+      if (!p || !this.canSeeIsle(p)) break
+      root = p
+    }
+    const rows: IsleRow[] = [root]
+    let frontier = [root.id]
+    let truncated = false
+    while (frontier.length && rows.length < limit) {
+      const { results } = await this.d1
+        .prepare(`SELECT * FROM isles WHERE parent_id IN (${frontier.map(() => '?').join(',')}) AND deleted_at IS NULL ORDER BY created_at`)
+        .bind(...frontier)
+        .all<IsleRow>()
+      const kids = results.filter((r) => this.canSeeIsle(r))
+      if (rows.length + kids.length > limit) truncated = true
+      const take = kids.slice(0, limit - rows.length)
+      rows.push(...take)
+      frontier = take.map((r) => r.id)
+    }
+    if (!rows.some((r) => r.id === focus.id)) rows.push(focus)
+
+    const ids = rows.map((r) => r.id)
+    const old = (
+      await this.d1
+        .prepare(`SELECT isle_id, version, source_blob, bindings, note, created_at FROM isle_versions WHERE isle_id IN (${ids.map(() => '?').join(',')}) ORDER BY version`)
+        .bind(...ids)
+        .all<{ isle_id: string; version: number; source_blob: string; bindings: string; note: string | null; created_at: number }>()
+    ).results
+    type V = { version: number; source: string; bindings: Record<string, string>; note: string | null; createdAt: number }
+    const versionsOf = new Map<string, V[]>()
+    for (const r of rows) versionsOf.set(r.id, [])
+    for (const o of old) versionsOf.get(o.isle_id)?.push({ version: o.version, source: o.source_blob, bindings: parseJson(o.bindings, {}), note: o.note, createdAt: o.created_at })
+    for (const r of rows) versionsOf.get(r.id)!.push({ version: r.version, source: r.source_blob, bindings: parseJson(r.bindings, {}), note: r.note, createdAt: r.updated_at })
+    // the first version's time is when the isle was made
+    for (const r of rows) { const v = versionsOf.get(r.id)!; if (v[0]) v[0].createdAt = Math.min(v[0].createdAt, r.created_at) }
+
+    // dataset names for the data changes (data you can't see stays unnamed)
+    const dataIds = [...new Set([...versionsOf.values()].flatMap((vs) => vs.flatMap((v) => Object.values(v.bindings))))]
+    const dataName = new Map<string, string>()
+    for (let i = 0; i < dataIds.length; i += 90) {
+      const chunk = dataIds.slice(i, i + 90)
+      const { results } = await this.d1.prepare(`SELECT * FROM datasets WHERE id IN (${chunk.map(() => '?').join(',')})`).bind(...chunk).all<DatasetRow>()
+      for (const d of results) dataName.set(d.id, this.canReadDataset(d) ? d.path : 'private data')
+    }
+    const name = (did: string | undefined) => (did ? (dataName.get(did) ?? 'deleted data') : null)
+    const dataDelta = (a: Record<string, string>, b: Record<string, string>): DataDelta[] =>
+      [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => a[k] !== b[k]).map((k) => ({ slot: k, from: name(a[k]), to: name(b[k]) }))
+
+    // page text, read once per distinct page (and only as many as are worth comparing)
+    const texts = new Map<string, Promise<string>>()
+    const textOf = (hash: string) => { if (!texts.has(hash)) texts.set(hash, this.blobText(hash)); return texts.get(hash)! }
+    let reads = 0
+    const page = async (a: string, b: string) => {
+      if (a === b) return { similarity: 1, added: 0, removed: 0 }
+      if (++reads > 160) return null
+      return pageChanges(await textOf(a), await textOf(b))
+    }
+
+    const byId = new Map(rows.map((r) => [r.id, r]))
+    const out = new Map<string, EvolutionIsle>()
+    for (const r of rows) {
+      const vs = versionsOf.get(r.id)!
+      const steps: EvolutionStep[] = []
+      let parentVersion: number | null = null
+      for (const [n, v] of vs.entries()) {
+        let delta: EvolutionStep['page'] = null
+        let data: DataDelta[] = []
+        if (n > 0) {
+          const prev = vs[n - 1]!
+          delta = await page(prev.source, v.source)
+          data = dataDelta(prev.bindings, v.bindings)
+        } else if (r.parent_id && byId.has(r.parent_id)) {
+          const pvs = versionsOf.get(r.parent_id)!
+          const then = [...pvs].reverse().find((pv) => pv.createdAt <= r.created_at) ?? pvs[0]!
+          parentVersion = then.version
+          delta = await page(then.source, v.source)
+          data = dataDelta(then.bindings, v.bindings)
+        }
+        steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, data })
+      }
+      out.set(r.id, { isle: await this.toSummary(r), parentId: r.parent_id && byId.has(r.parent_id) ? r.parent_id : null, parentVersion, depth: 0, versions: steps })
+    }
+    // depth-first from the root, oldest first among siblings
+    const order: EvolutionIsle[] = []
+    const kidsOf = new Map<string, IsleRow[]>()
+    for (const r of rows) if (r.parent_id && byId.has(r.parent_id) && r.id !== root.id) (kidsOf.get(r.parent_id) ?? kidsOf.set(r.parent_id, []).get(r.parent_id)!).push(r)
+    const walk = (r: IsleRow, depth: number) => {
+      const e = out.get(r.id)!
+      e.depth = depth
+      order.push(e)
+      for (const k of (kidsOf.get(r.id) ?? []).sort((a, b) => a.created_at - b.created_at)) walk(k, depth + 1)
+    }
+    walk(root, 0)
+    for (const e of out.values()) if (!order.includes(e)) order.push(e)
+    return { rootId: root.id, focusId: focus.id, isles: order, truncated }
   }
 
   async listIsles(opts: { ownerId?: string; q?: string; sort?: 'recent' | 'stars'; limit?: number; offset?: number } = {}): Promise<IsleSummary[]> {
@@ -765,10 +875,10 @@ export class Store {
     if (!existing) {
       await this.d1
         .prepare(
-          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, note, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, relation, visibility, now, now)
+        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, relation, visibility, input.note ?? null, now, now)
         .run()
     }
 

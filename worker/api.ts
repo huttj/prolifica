@@ -195,7 +195,11 @@ api.get('/api/isles', async (request, env) => {
   })
 })
 api.get('/api/isles/:id', async (request, env) => (await store(request, env).getIsle(request.params.id!)).isle)
-api.get('/api/isles/:id/source', async (request, env) => new Response(await store(request, env).isleSource(request.params.id!), { headers: { 'content-type': 'text/plain; charset=utf-8' } }))
+api.get('/api/isles/:id/source', async (request, env) => {
+  const v = Number(new URL(request.url).searchParams.get('v')) || undefined
+  return new Response(await store(request, env).isleSource(request.params.id!, v), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+})
+api.get('/api/isles/:id/evolution', (request, env) => store(request, env).evolution(request.params.id!))
 api.patch('/api/isles/:id', requireAuth, async (request, env) => {
   const b = await body<{ title?: string; description?: string | null; visibility?: Visibility }>(request)
   return (await store(request, env).publishIsle({ id: request.params.id, title: b.title, description: b.description, visibility: b.visibility })).isle

@@ -82,6 +82,8 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   swap them: those belong in the data. Make the page read them from a slot (a small "meta" JSON is
   fine) — update the original in place if it's yours, otherwise publish that as a restyle — and then
   rebind. The next person with their own data can then use the page as it is.
+- Always pass a note saying what you changed, on a remix as on an update: people compare a family's
+  steps side by side, and the note is what tells them why each one exists.
 - When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
   fixed something small; it is the same view) or view: "new" (it looks or works differently). If you
   don't say, a near-identical page counts as the same view.
@@ -290,7 +292,7 @@ const TOOLS = [
       uses: { type: 'array', description: 'Pieces borrowed from other isles', items: obj({ isle: s('Isle id'), ...ANCHOR_PROPS }, ['isle']) },
       visibility: s('public (default), unlisted, or private', { enum: ['public', 'unlisted', 'private'] }),
       id: s('Update this isle of yours in place (keeps the old version)'),
-      note: s('For an update: what changed in this version (shown in its history)'),
+      note: s('What changed, in a sentence or two. For an update: what this version changed. For a new remix: what you changed from the original and why. Shown in the family\'s evolution view, so be specific ("swapped in Kennewick\'s data; city name now read from meta.city").'),
       view: s('With html and a parent: "same" if you only adapted the page to new data or fixed something small, "new" if it now looks or works differently. Decides whether it joins its parent\'s island group.', { enum: ['same', 'new'] }),
     }),
   },

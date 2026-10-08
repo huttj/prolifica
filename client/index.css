@@ -431,3 +431,38 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .comment.anchored:hover { background: var(--bg-2); }
 .comment.focused { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-2); }
 .comment.anchored { padding: 10px 8px; margin: 0 -8px; }
+
+/* how a family evolved */
+.evo-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 20px; align-items: start; margin-top: 16px; }
+@media (max-width: 900px) { .evo-grid { grid-template-columns: minmax(0, 1fr); } }
+.evo-compare { position: sticky; top: 70px; max-height: calc(100dvh - 90px); overflow: auto; }
+@media (max-width: 900px) { .evo-compare { position: static; max-height: none; } }
+.evo-line { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.evo-item { position: relative; padding-left: calc(var(--depth, 0) * 22px); }
+.evo-item::before { content: ''; position: absolute; left: calc(var(--depth, 0) * 22px - 12px); top: -10px; bottom: 50%; border-left: 2px solid var(--line-2); border-bottom: 2px solid var(--line-2); width: 10px; border-bottom-left-radius: 8px; display: var(--rail, block); }
+.evo-item[style*='--depth: 0']::before { display: none; }
+.evo-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 10px; }
+.evo-card.on { border-color: var(--accent-2); box-shadow: 0 0 0 2px var(--accent-soft); }
+.evo-item.focus > .evo-card { background: color-mix(in srgb, var(--accent-soft) 35%, var(--card)); }
+@media (max-width: 520px) { .evo-card { grid-template-columns: 76px minmax(0, 1fr); } }
+.evo-thumb { padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); cursor: pointer; aspect-ratio: 16 / 10; align-self: start; }
+.evo-title { font-weight: 650; color: var(--ink); }
+.evo-note { margin: 6px 0 0; font-size: 13.5px; line-height: 1.45; }
+.evo-note.desc { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.evo-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.evo-chip { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--bg-2); color: var(--ink-2); white-space: nowrap; }
+.evo-chip.data { background: var(--accent-soft); color: var(--accent); }
+.evo-chip .add, .evo-diff .add .sign { color: #2f8a47; }
+.evo-chip .del, .evo-diff .del .sign { color: var(--danger); }
+.evo-versions { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--line); }
+.evo-versions li button { display: flex; gap: 8px; align-items: flex-start; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 7px 2px; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; }
+.evo-versions li button:hover, .evo-versions li.on button { background: var(--accent-soft); }
+.evo-data { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12.5px; }
+.evo-data th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.evo-data td { padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
+.evo-diff { margin-top: 8px; max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); }
+.evo-diff > div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 22px; text-indent: -14px; }
+.evo-diff .sign { display: inline-block; width: 14px; text-indent: 0; color: var(--muted); }
+.evo-diff .add { background: color-mix(in srgb, #2f8a47 13%, transparent); }
+.evo-diff .del { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.evo-diff .fold { color: var(--muted); background: var(--bg-2); padding: 2px 8px; text-indent: 0; font-style: italic; }

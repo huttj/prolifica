@@ -2,6 +2,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import type { Me } from '../shared/types'
 import { api, ApiError } from './api'
 import { Archipelago } from './Archipelago'
+import { EvolutionPage } from './Evolution'
 import { DataPage, MyData } from './DataPages'
 import { Home } from './Home'
 import { IslePage } from './IslePage'
@@ -67,6 +68,7 @@ export function App() {
   let m: RegExpExecArray | null
   if (path === '/') page = <Home />
   else if ((m = /^\/i\/([a-z0-9]+)\/?$/.exec(path))) page = <IslePage id={m[1]!} />
+  else if ((m = /^\/i\/([a-z0-9]+)\/family\/?$/.exec(path))) page = <EvolutionPage id={m[1]!} />
   else if ((m = /^\/d\/([a-z0-9]+)\/?$/.exec(path))) page = <DataPage id={m[1]!} />
   else if ((m = /^\/@([a-z0-9_-]+)\/?$/i.exec(path))) page = <Profile handle={m[1]!.toLowerCase()} tab={query.get('tab')} />
   else if (path === '/data') page = <MyData />

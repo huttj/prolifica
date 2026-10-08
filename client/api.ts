@@ -1,4 +1,4 @@
-import type { ApiToken, Anchor, Dataset, DatasetRef, Isle, IsleSummary, IsleVersion, LibraryItem, Lineage, Mark, Me, Person, SeaChart, SiteInfo, SiteSummary, TreeNode, Visibility } from '../shared/types'
+import type { ApiToken, Anchor, Dataset, DatasetRef, Evolution, Isle, IsleSummary, IsleVersion, LibraryItem, Lineage, Mark, Me, Person, SeaChart, SiteInfo, SiteSummary, TreeNode, Visibility } from '../shared/types'
 
 export interface SourcePatch {
   url?: string | null
@@ -72,7 +72,8 @@ export const api = {
 
   isles: (o: { sort?: 'recent' | 'stars'; q?: string; handle?: string; limit?: number; offset?: number } = {}) => call<IsleSummary[]>('GET', `/api/isles${q(o)}`),
   isle: (id: string) => call<Isle>('GET', `/api/isles/${id}`),
-  isleSource: (id: string) => call<string>('GET', `/api/isles/${id}/source`, undefined, { as: 'text' }),
+  isleSource: (id: string, v?: number) => call<string>('GET', `/api/isles/${id}/source${v ? `?v=${v}` : ''}`, undefined, { as: 'text' }),
+  evolution: (id: string) => call<Evolution>('GET', `/api/isles/${id}/evolution`),
   updateIsle: (id: string, patch: { title?: string; description?: string | null; visibility?: Visibility }) => call<Isle>('PATCH', `/api/isles/${id}`, patch),
   deleteIsle: (id: string) => call('DELETE', `/api/isles/${id}`),
   rebind: (id: string, bindings: Record<string, string>, title?: string) => call<Isle>('POST', `/api/isles/${id}/rebind`, { bindings, title }),

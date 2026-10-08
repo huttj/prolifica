@@ -683,6 +683,9 @@ function Family({ isle }: { isle: Isle }) {
           <div className="small muted grow" style={{ fontWeight: 600 }}>Where it came from, and what grew from it</div>
           {isle.visibility === 'public' && <Link to={`/tree?isle=${isle.id}`} className="tiny">Show on the map</Link>}
         </div>
+        <Link to={`/i/${isle.id}/family`} className="btn sm" title="Every remix and version, what changed at each step, and a side-by-side compare">
+          <Icon name="open" /> See how it evolved
+        </Link>
         <Legend />
         <ThreadView roots={chain(ancestors, tree)} current={isle.id} />
       </div>

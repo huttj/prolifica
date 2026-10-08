@@ -32,6 +32,21 @@ export function pageSimilarity(a: string, b: string): number {
   return na + nb ? (2 * common) / (na + nb) : 1
 }
 
+/** How much one page differs from another: its similarity, and roughly how many lines came and went. */
+export function pageChanges(a: string, b: string): { similarity: number; added: number; removed: number } {
+  if (a === b) return { similarity: 1, added: 0, removed: 0 }
+  const bag = (s: string) => {
+    const m = new Map<string, number>()
+    for (const t of s.split(/\n|(?<=>)|(?<=;)|(?<=\})/)) { const k = t.trim(); if (k) m.set(k, (m.get(k) ?? 0) + 1) }
+    return m
+  }
+  const A = bag(a), B = bag(b)
+  let added = 0, removed = 0
+  for (const [k, n] of B) added += Math.max(0, n - (A.get(k) ?? 0))
+  for (const [k, n] of A) removed += Math.max(0, n - (B.get(k) ?? 0))
+  return { similarity: pageSimilarity(a, b), added, removed }
+}
+
 /** Pages at least this alike count as the same view when the publisher doesn't say. */
 export const SAME_VIEW = 0.95
 
