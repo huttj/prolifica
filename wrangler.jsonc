@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "prolifica",
+  "main": "worker/index.ts",
+  "account_id": "183aa6473d53e6c3f29cfa852ebfb58a",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "prolifica.app", "custom_domain": true },
+    // People's isles run here: another origin, so a page can never read the app's session
+    { "pattern": "isles.prolifica.app", "custom_domain": true }
+  ],
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // the worker decides per host: the app's assets on prolifica.app, isles on isles.prolifica.app
+    "run_worker_first": true
+  },
+  "vars": {
+    "EMAIL_FROM": "Prolifica <hello@prolifica.app>",
+    "SITE_URL": "https://prolifica.app",
+    "ISLES_URL": "https://isles.prolifica.app",
+    "QUOTA_BYTES": "5242880",
+    "ADMIN_QUOTA_BYTES": "104857600"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "prolifica", "database_id": "1163611f-9127-4ef1-931b-8f8ef3f426f6", "migrations_dir": "migrations" }
+  ],
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "56be058fcab84e9d900d5accc08ff06d" }
+  ],
+  "r2_buckets": [
+    { "binding": "BLOBS", "bucket_name": "prolifica-blobs" }
+  ],
+  // takes the static previews of isles (worker/shots.ts)
+  "browser": { "binding": "BROWSER" },
+  "send_email": [
+    { "name": "EMAIL", "remote": true }
+  ]
+}
