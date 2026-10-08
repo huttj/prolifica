@@ -9,6 +9,9 @@ import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
 
 /** Data, isles, the lineage graph and marks. Shared by the REST API and the MCP tools, so both obey the same rules. */
 
+/** A component's name for lineage: "Legend", "legend" and "the legend" are one part; data-pid style ("score-bars") kept as is. */
+export const partName = (s: string) => s.trim().toLowerCase().replace(/^the\s+/, '').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'page'
+
 /** Keep a mark's view state small and well-formed; anything else is dropped rather than stored. */
 function cleanState(v: unknown): AnchorState | undefined {
   if (!v || typeof v !== 'object') return undefined
@@ -83,6 +86,10 @@ export interface IsleRow {
   visibility: Visibility
   version: number
   note: string | null
+  /** JSON [{isle, version, note}]: what this version pulled in from other isles */
+  draws: string | null
+  /** JSON [{part, what}]: what this version changed, component by component */
+  changes: string | null
   star_count: number
   created_at: number
   updated_at: number
@@ -121,6 +128,10 @@ export interface PublishInput {
   note?: string
   /** what the publisher says changed in the page: 'same' view (adapted to new data, small fixes) or a 'new' one */
   view?: 'same' | 'new'
+  /** other isles this version pulled changes from (not its parent): [{isle, version?, note?}] */
+  drawsFrom?: { isle: string; version?: number; note?: string; parts?: string[] }[]
+  /** what this version changed, part by part: [{part, what}] (part: a component, ideally its data-pid) */
+  changes?: { part: string; what: string }[]
   /** internal: put back a page this isle had before (restoring a version) */
   sourceBlob?: string
 }
@@ -704,15 +715,21 @@ export class Store {
     const ids = rows.map((r) => r.id)
     const old = (
       await this.d1
-        .prepare(`SELECT isle_id, version, source_blob, bindings, note, created_at FROM isle_versions WHERE isle_id IN (${ids.map(() => '?').join(',')}) ORDER BY version`)
+        .prepare(`SELECT isle_id, version, source_blob, bindings, note, draws, changes, created_at FROM isle_versions WHERE isle_id IN (${ids.map(() => '?').join(',')}) ORDER BY version`)
         .bind(...ids)
-        .all<{ isle_id: string; version: number; source_blob: string; bindings: string; note: string | null; created_at: number }>()
+        .all<{ isle_id: string; version: number; source_blob: string; bindings: string; note: string | null; draws: string | null; changes: string | null; created_at: number }>()
     ).results
-    type V = { version: number; source: string; bindings: Record<string, string>; note: string | null; createdAt: number }
+    type Draw = { isle: string; version: number; note: string | null; parts?: string[] }
+    type Change = { part: string; what: string }
+    type V = { version: number; source: string; bindings: Record<string, string>; note: string | null; draws: Draw[]; changes: Change[]; createdAt: number }
     const versionsOf = new Map<string, V[]>()
     for (const r of rows) versionsOf.set(r.id, [])
-    for (const o of old) versionsOf.get(o.isle_id)?.push({ version: o.version, source: o.source_blob, bindings: parseJson(o.bindings, {}), note: o.note, createdAt: o.created_at })
-    for (const r of rows) versionsOf.get(r.id)!.push({ version: r.version, source: r.source_blob, bindings: parseJson(r.bindings, {}), note: r.note, createdAt: r.updated_at })
+    for (const o of old) versionsOf.get(o.isle_id)?.push({ version: o.version, source: o.source_blob, bindings: parseJson(o.bindings, {}), note: o.note, draws: parseJson<Draw[]>(o.draws, []), changes: parseJson<Change[]>(o.changes, []), createdAt: o.created_at })
+    for (const r of rows) versionsOf.get(r.id)!.push({ version: r.version, source: r.source_blob, bindings: parseJson(r.bindings, {}), note: r.note, draws: parseJson<Draw[]>(r.draws, []), changes: parseJson<Change[]>(r.changes, []), createdAt: r.updated_at })
+    // titles of isles drawn from outside the family, so the graph can name them
+    const outside = [...new Set([...versionsOf.values()].flatMap((vs) => vs.flatMap((v) => v.draws.map((d) => d.isle))))].filter((d) => !rows.some((r) => r.id === d))
+    const outsideTitle = new Map<string, string>()
+    for (const oid of outside.slice(0, 40)) { const o = await this.isleRow(oid); if (o && this.canSeeIsle(o)) outsideTitle.set(o.id, o.title) }
     // the first version's time is when the isle was made
     for (const r of rows) { const v = versionsOf.get(r.id)!; if (v[0]) v[0].createdAt = Math.min(v[0].createdAt, r.created_at) }
 
@@ -758,7 +775,10 @@ export class Store {
           delta = await page(then.source, v.source)
           data = dataDelta(then.bindings, v.bindings)
         }
-        steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, data })
+        const draws = v.draws
+          .filter((d) => rows.some((r) => r.id === d.isle) || outsideTitle.has(d.isle))
+          .map((d) => ({ isle: d.isle, version: d.version, note: d.note, parts: d.parts ?? [], title: rows.find((r) => r.id === d.isle)?.title ?? outsideTitle.get(d.isle)!, inFamily: rows.some((r) => r.id === d.isle) }))
+        steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, data, ...(draws.length ? { draws } : {}), ...(v.changes.length ? { changes: v.changes } : {}) })
       }
       out.set(r.id, { isle: await this.toSummary(r), parentId: r.parent_id && byId.has(r.parent_id) ? r.parent_id : null, parentVersion, depth: 0, versions: steps })
     }
@@ -853,32 +873,50 @@ export class Store {
       relation = classifyRelation({ source: parent.source_blob, bindings: parseJson(parent.bindings, {}) }, { source: sourceHash, bindings: bindingIds }, { view: input.view, similarity })
     }
 
+    // what this version drew from: other isles you can see, at a version they have (default: their latest)
+    let draws: string | null | undefined
+    if (input.drawsFrom) {
+      const list: { isle: string; version: number; note: string | null }[] = []
+      for (const d of input.drawsFrom.slice(0, 20)) {
+        const src = await this.isleRow(String(d.isle ?? ''))
+        if (!src || !this.canSeeIsle(src)) fail(400, `draws_from: no isle with id ${d.isle} that you can see`)
+        if (src!.id === input.id) fail(400, 'draws_from: an isle drawing from its own past is just its history; name another isle')
+        const v = Number(d.version) || src!.version
+        if (v > src!.version || v < 1) fail(400, `draws_from: ${src!.title} has no version ${v}`)
+        list.push({ isle: src!.id, version: v, note: d.note ? String(d.note).slice(0, 500) : null, ...(d.parts?.length ? { parts: d.parts.slice(0, 20).map((p) => partName(String(p))) } : {}) })
+      }
+      draws = list.length ? JSON.stringify(list) : null
+    }
+    const changes: string | null | undefined = input.changes
+      ? JSON.stringify(input.changes.filter((c) => c && c.part && c.what).slice(0, 40).map((c) => ({ part: partName(String(c.part)), what: String(c.what).slice(0, 600) }))) || null
+      : undefined
+
     const now = Date.now()
     const id = existing?.id ?? shortId()
     const samePage = existing && existing.source_blob === sourceHash && existing.bindings === JSON.stringify(bindingIds) && existing.slots === JSON.stringify(slots)
     if (existing && samePage) {
       await this.d1
-        .prepare('UPDATE isles SET title = ?, description = ?, visibility = ?, updated_at = ? WHERE id = ?')
-        .bind(title.slice(0, 200), description, visibility, now, id)
+        .prepare('UPDATE isles SET title = ?, description = ?, visibility = ?, draws = COALESCE(?, draws), changes = COALESCE(?, changes), updated_at = ? WHERE id = ?')
+        .bind(title.slice(0, 200), description, visibility, draws ?? null, changes ?? null, now, id)
         .run()
     } else if (existing) {
       await this.d1.batch([
         this.d1
-          .prepare('INSERT OR IGNORE INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-          .bind(id, existing.version, me.id, existing.source_blob, existing.bindings, existing.note, existing.updated_at),
+          .prepare('INSERT OR IGNORE INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(id, existing.version, me.id, existing.source_blob, existing.bindings, existing.note, existing.draws ?? null, existing.changes ?? null, existing.updated_at),
         this.d1
-          .prepare('UPDATE isles SET title = ?, description = ?, source_blob = ?, slots = ?, bindings = ?, visibility = ?, version = version + 1, note = ?, updated_at = ? WHERE id = ?')
-          .bind(title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), visibility, input.note ?? null, now, id),
+          .prepare('UPDATE isles SET title = ?, description = ?, source_blob = ?, slots = ?, bindings = ?, visibility = ?, version = version + 1, note = ?, draws = ?, changes = ?, updated_at = ? WHERE id = ?')
+          .bind(title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), visibility, input.note ?? null, draws ?? null, changes ?? null, now, id),
       ])
     }
     if (existing && relation !== existing.relation) await this.d1.prepare('UPDATE isles SET relation = ? WHERE id = ?').bind(relation, id).run()
     if (!existing) {
       await this.d1
         .prepare(
-          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, note, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, note, draws, changes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, relation, visibility, input.note ?? null, now, now)
+        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, relation, visibility, input.note ?? null, draws ?? null, changes ?? null, now, now)
         .run()
     }
 

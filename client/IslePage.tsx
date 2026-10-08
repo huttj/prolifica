@@ -5,6 +5,7 @@ import { navigate } from './navigate'
 import { AskAiButton, AskPopover, changesPrompt, type ChangeNote, useChangeNotes } from './ask'
 import { Legend, ThreadView } from './Tree'
 import { UseMyDataModal } from './UseMyData'
+import { EvolutionModal } from './Evolution'
 import {
   EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, RelationChip, SizedFrame, useAsync, useSession,
 } from './ui'
@@ -19,7 +20,10 @@ const LAYERS: { id: Layer; label: string }[] = [
   { id: 'everyone', label: 'Everyone' },
 ]
 
-export function IslePage({ id }: { id: string }) {
+const PANEL_KEY = 'pf:panelWidth'
+const readPanelWidth = () => { try { const n = Number(localStorage.getItem(PANEL_KEY)); return n >= 280 ? n : 360 } catch { return 360 } }
+
+export function IslePage({ id, family = false }: { id: string; family?: boolean }) {
   const { me, toast } = useSession()
   const isle = useAsync(() => api.isle(id), [id, me?.id])
   const [layer, setLayer] = useState<Layer>('following')
@@ -36,6 +40,21 @@ export function IslePage({ id }: { id: string }) {
   const [remixOpen, setRemixOpen] = useState(false)
   const [useDataOpen, setUseDataOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // the side panel's width, dragged by its edge and remembered per browser
+  const [panelW, setPanelW] = useState(readPanelWidth)
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const move = (ev: PointerEvent) => setPanelW(Math.round(Math.min(Math.max(280, window.innerWidth - ev.clientX), window.innerWidth * 0.7)))
+    const up = () => {
+      document.body.classList.remove('resizing')
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setPanelW((w) => { try { localStorage.setItem(PANEL_KEY, String(w)) } catch { /* storage unavailable */ } return w })
+    }
+    document.body.classList.add('resizing')
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   // an older version shown in the frame instead of the latest
   const [viewing, setViewing] = useState<IsleVersion | null>(null)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -272,7 +291,8 @@ export function IslePage({ id }: { id: string }) {
           />
         </div>
         {tab && (
-          <aside className="panel">
+          <aside className="panel" style={{ '--panel-w': `${panelW}px` } as React.CSSProperties}>
+            <div className="panel-grip" onPointerDown={startResize} onDoubleClick={() => { setPanelW(360); try { localStorage.removeItem(PANEL_KEY) } catch { /* storage unavailable */ } }} role="separator" aria-orientation="vertical" aria-label="Drag to resize the panel; double-click to reset" title="Drag to resize · double-click to reset" />
             <div className="tabs">
               <button className={tab === 'notes' ? 'on' : ''} onClick={() => setTab('notes')}>Notes</button>
               <button className={tab === 'changes' ? 'on' : ''} onClick={() => setTab('changes')}>Changes{changes.length ? ` ${changes.length}` : ''}</button>
@@ -326,6 +346,7 @@ export function IslePage({ id }: { id: string }) {
       </div>
       {settingsOpen && <IsleSettings isle={i} onClose={() => setSettingsOpen(false)} onChanged={isle.reload} />}
       {useDataOpen && <UseMyDataModal isle={i} onClose={() => setUseDataOpen(false)} />}
+      {family && <EvolutionModal id={i.id} onClose={() => navigate(`/i/${i.id}`, { replace: true })} />}
     </div>
   )
 }
@@ -683,7 +704,7 @@ function Family({ isle }: { isle: Isle }) {
           <div className="small muted grow" style={{ fontWeight: 600 }}>Where it came from, and what grew from it</div>
           {isle.visibility === 'public' && <Link to={`/tree?isle=${isle.id}`} className="tiny">Show on the map</Link>}
         </div>
-        <Link to={`/i/${isle.id}/family`} className="btn sm" title="Every remix and version, what changed at each step, and a side-by-side compare">
+        <Link to={`/i/${isle.id}/family`} className="btn sm" title="Every remix and version as a graph: what changed at each step, what converged, and a side-by-side compare">
           <Icon name="open" /> See how it evolved
         </Link>
         <Legend />

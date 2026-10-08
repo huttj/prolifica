@@ -257,6 +257,10 @@ export interface EvolutionStep {
   page: PageDelta | null
   data: DataDelta[]
   title?: string
+  /** changes this version pulled in from other isles (besides its own past and its parent) */
+  draws?: { isle: string; version: number; note: string | null; parts: string[]; title: string; inFamily: boolean }[]
+  /** what it changed, component by component ("legend", "tweet-text"): a component's own lineage */
+  changes?: { part: string; what: string }[]
 }
 
 export interface EvolutionIsle {
