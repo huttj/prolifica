@@ -1,6 +1,7 @@
 import { COLLECTION_METHODS, type Anchor, type DataSource, type IsleSummary, type Visibility } from '../shared/types'
 import { appOrigin, islesOrigin, quotaFor } from './auth'
 import { checkIsle, shootLater } from './shots'
+import { applyJsonSets, applyTextEdits, EditError, grepLines, type TextEdit } from '../shared/edits'
 import { Db, type UserRow } from './db'
 import { Store, StoreError, fmtBytes, type Layer, type SourceInput } from './store'
 
@@ -89,6 +90,12 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   lineage trees get drawn and how credit flows.
 - Update your own isle in place with id=<isle> and a short note saying what changed; each
   update keeps the old version, and people can look back through the history.
+
+## Small changes are cheap
+Don't read or resend a whole page to change a few words. get_isle with grep (or lines) returns just the
+matching lines; edit_isle applies exact find/replace edits on the server (to your isle as a new version,
+or as_remix to publish your own version of someone else's); edit_data sets fields in a JSON dataset by
+path ("city.name", "topics[3].title") or edits text data in place. Then check_isle.
 
 ## Test what you publish
 check_isle opens an isle in a real browser and returns a screenshot with its script errors, failed
@@ -222,8 +229,38 @@ const TOOLS = [
   {
     name: 'get_isle',
     description: 'One isle: details, slots, bound data, parent, what it borrowed, and (by default) its HTML source. Read this before remixing.',
-    inputSchema: obj({ id: s('Isle id'), source: { type: 'boolean', description: 'Include the HTML (default true)' } }, ['id']),
+    inputSchema: obj({
+      id: s('Isle id'),
+      source: { type: 'boolean', description: 'Include the whole HTML (default true, unless grep or lines is given). Pages can be large: for a small change, grep for what you need and use edit_isle.' },
+      grep: s('Return only the page lines matching this pattern (a regex, case-insensitive), numbered, with a little context'),
+      context: { type: 'integer', description: 'Lines of context around each grep match (default 2)' },
+      lines: s('Return just these page lines, e.g. "120-180"'),
+    }, ['id']),
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'edit_isle',
+    description:
+      'Change a few things in an isle\'s page without resending it: exact find/replace edits applied on the server. On your own isle it becomes a new version (with note); with as_remix it publishes your own version of any isle (parent set for you). Each find must match exactly once unless all: true. Use get_isle with grep to find the text first, then check_isle.',
+    inputSchema: obj({
+      id: s('Isle id'),
+      edits: { type: 'array', description: 'Applied in order', items: obj({ find: s('Exact text to find (include enough around it to be unique)'), replace: s('What to put instead'), all: { type: 'boolean', description: 'Replace every occurrence' } }, ['find', 'replace']) },
+      note: s('What changed, for the version history (or, as a remix, what you changed from the original)'),
+      view: s('"same" if the page is still the same view (adapted to data, small fixes), "new" if it now looks or works differently', { enum: ['same', 'new'] }),
+      as_remix: { type: 'boolean', description: 'Publish the edited page as a new isle with this one as its parent, instead of updating it' },
+      title: s('With as_remix: the new isle\'s title'),
+      bindings: { type: 'object', description: 'With as_remix: slot -> dataset id for the new isle (default: keep the original\'s)', additionalProperties: { type: 'string' } },
+    }, ['id', 'edits']),
+  },
+  {
+    name: 'edit_data',
+    description:
+      'Change a dataset in place without resending it: set or remove fields of JSON data by path ("city.name", "topics[3].title"), or exact find/replace edits on any text data. Keeps its id, description, source and lineage; isles bound to it show the change.',
+    inputSchema: obj({
+      id: s('Dataset id'),
+      set: { type: 'array', description: 'For JSON data', items: obj({ path: s('Dot path with [n] for arrays, e.g. "city.name" or "wards[2].members"'), value: { description: 'The new value (any JSON)' }, remove: { type: 'boolean', description: 'Delete it instead' } }, ['path']) },
+      edits: { type: 'array', description: 'For any text data (csv, markdown, json as text)', items: obj({ find: s('Exact text to find'), replace: s('What to put instead'), all: { type: 'boolean' } }, ['find', 'replace']) },
+    }, ['id']),
   },
   {
     name: 'check_isle',
@@ -516,8 +553,65 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         uses: isle.uses.map((u) => ({ isle: u.isle.id, title: u.isle.title, selector: u.selector, label: u.label })),
         versions: (await store.versions(id)).map((v) => ({ version: v.version, note: v.note, at: new Date(v.createdAt).toISOString() })),
       }
-      if (args.source !== false) out.html = await store.blobText(row.source_blob)
+      const wantSlice = str(args.grep) || str(args.lines)
+      if (wantSlice || args.source !== false) {
+        const html = await store.blobText(row.source_blob)
+        const total = html.split('\n').length
+        if (str(args.grep)) {
+          const g = grepLines(html, str(args.grep)!, Math.max(0, Math.min(20, Number(args.context ?? 2))))
+          out.source = { lines_total: total, bytes: html.length, matches: g.matches, excerpt: g.lines }
+        } else if (str(args.lines)) {
+          const m = /^(\d+)\s*-\s*(\d+)$/.exec(str(args.lines)!)
+          if (!m) throw new StoreError(400, 'lines looks like "120-180"')
+          const a = Math.max(1, Number(m[1])), b = Math.min(total, Number(m[2]), a + 400)
+          out.source = { lines_total: total, bytes: html.length, from: a, to: b, excerpt: html.split('\n').slice(a - 1, b).map((l, i) => `${a + i}: ${l}`).join('\n') }
+        } else out.html = html
+      }
       return text(out)
+    }
+
+    case 'edit_isle': {
+      const id = String(args.id ?? '')
+      const { isle, row } = await store.getIsle(id)
+      let html: string
+      let replaced: number
+      try {
+        ;({ text: html, replaced } = applyTextEdits(await store.blobText(row.source_blob), args.edits as TextEdit[]))
+      } catch (e) {
+        if (e instanceof EditError) throw new StoreError(400, e.message)
+        throw e
+      }
+      const view = args.view === 'same' || args.view === 'new' ? args.view : undefined
+      const mine = row.owner_id === user.id
+      if (!mine && !args.as_remix) throw new StoreError(403, `"${isle.title}" isn't yours, so it can't change in place. Pass as_remix: true to publish your own version with these edits.`)
+      const { isle: out } = args.as_remix
+        ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view })
+        : await store.publishIsle({ id, html, note: str(args.note), view })
+      shootLater(ctx, env, out.id, islesOrigin(request, env))
+      return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, next: 'check_isle to see it' })
+    }
+
+    case 'edit_data': {
+      const { dataset, row } = await store.getDataset(String(args.id ?? ''))
+      if (dataset.kind === 'image' || dataset.kind === 'binary') throw new StoreError(400, 'edit_data works on text and JSON data')
+      const before = await store.blobText(row.blob)
+      let after: string
+      try {
+        if (Array.isArray(args.set) && args.set.length) {
+          if (dataset.kind !== 'json') throw new EditError('set works on JSON data; use edits for text')
+          let value: unknown
+          try { value = JSON.parse(before) } catch { throw new EditError('That dataset isn\'t valid JSON, so set can\'t be used; use edits') }
+          const pretty = /\n\s+["{[\]]/.test(before.slice(0, 2000))
+          after = JSON.stringify(applyJsonSets(value, args.set as never), null, pretty ? 2 : undefined)
+          if (Array.isArray(args.edits) && args.edits.length) after = applyTextEdits(after, args.edits as TextEdit[]).text
+        } else after = applyTextEdits(before, args.edits as TextEdit[]).text
+      } catch (e) {
+        if (e instanceof EditError) throw new StoreError(400, e.message)
+        throw e
+      }
+      if (dataset.kind === 'json') { try { JSON.parse(after) } catch { throw new StoreError(400, 'Those edits would leave the JSON invalid, so nothing was changed') } }
+      const d = await store.writeDataset({ id: dataset.id, path: dataset.path, bytes: new TextEncoder().encode(after), contentType: dataset.contentType })
+      return text({ id: d.id, path: d.path, size: fmtBytes(d.size), was: fmtBytes(before.length), url: `${app}/d/${d.id}` })
     }
 
     case 'check_isle': {
