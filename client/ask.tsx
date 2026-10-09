@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { Anchor, Isle } from '../shared/types'
+import type { Anchor } from '../shared/types'
 import { ConnectSteps } from './Settings'
-import { Link, Modal, useSession } from './ui'
+import { Icon, Link, Modal, useSession } from './ui'
 
 /**
  * Handing work to the person's own AI (the Causal Tools pattern): claude.ai and chatgpt.com can't be
@@ -186,53 +186,6 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
   )
 }
 
-// ---- change requests: notes that go to the AI and are then forgotten ----
-
-export interface ChangeNote {
-  id: string
-  anchor: Anchor | null
-  text: string
-}
-
-/** Kept for this tab only (a reload shouldn't lose a half-made list), never sent to the server. */
-export function useChangeNotes(isleId: string): [ChangeNote[], (next: ChangeNote[]) => void] {
-  const key = `pf:changes:${isleId}`
-  const read = () => {
-    try {
-      return JSON.parse(sessionStorage.getItem(key) ?? '[]') as ChangeNote[]
-    } catch {
-      return []
-    }
-  }
-  const [notes, setNotes] = useState<ChangeNote[]>(read)
-  useEffect(() => setNotes(read()), [key]) // eslint-disable-line react-hooks/exhaustive-deps
-  const set = useCallback(
-    (next: ChangeNote[]) => {
-      setNotes(next)
-      try {
-        if (next.length) sessionStorage.setItem(key, JSON.stringify(next))
-        else sessionStorage.removeItem(key)
-      } catch {
-        /* storage unavailable */
-      }
-    },
-    [key],
-  )
-  return [notes, set]
-}
-
-const where = (a: Anchor | null) => (a ? `the ${a.label ? `"${a.label}"` : 'element'} (${a.selector})` : 'the whole isle')
-
-export function changesPrompt(isle: Isle, notes: ChangeNote[], mine: boolean, origin: string): string {
-  const head = `Using the Prolifica connector, read isle ${isle.id} ("${isle.title}", ${origin}/i/${isle.id}) with get_isle, including its HTML.`
-  const how = mine
-    ? `Then make the changes. If they improve this isle, update it in place with publish_isle (id: "${isle.id}") and a short note saying what changed. If they ask for something new made from it (another place, subject or dataset), leave this one as it is and publish a new isle with parent: "${isle.id}". If it's unclear which I mean, ask me.`
-    : `It isn't mine, so make my own version: publish_isle with parent: "${isle.id}" (keep its data bindings unless a change needs different data).`
-  const list = notes.map((n, i) => `${i + 1}. On ${where(n.anchor)}: ${n.text.trim()}`).join('\n')
-  const ask = notes.length === 1 ? `Make this change:\n${list}` : `Make these ${notes.length} changes:\n${list}`
-  return `${head} ${how}\n\n${ask}\n\nKeep every data-pid attribute stable so comments and stars stay attached. Tell me the new version or link when it's done.`
-}
-
 // ---- asking with a description first ----
 
 /**
@@ -251,11 +204,16 @@ export function AskPopover(props: {
   optional?: boolean
   /** ready-made asks, one click to fill the box */
   suggestions?: string[]
+  /** pieces of the page the ask is about (an isle's elements) */
+  pieces?: AskPieces
 }) {
-  const { title, blurb, placeholder, label, prompt, onClose, children, optional, suggestions } = props
+  const { title, blurb, placeholder, label, prompt, onClose, children, optional, suggestions, pieces } = props
+  const picking = !!pieces?.picking
   const [want, setWant] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // while a piece is being picked the popover hides but stays, so nothing typed is lost
+    if (picking) return
     const away = (e: PointerEvent) => {
       const t = e.target as Element
       if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor, .scrim')) onClose()
@@ -267,11 +225,24 @@ export function AskPopover(props: {
       window.removeEventListener('pointerdown', away)
       window.removeEventListener('keydown', esc)
     }
-  }, [onClose])
+  }, [onClose, picking])
   return (
-    <div className="popover card" ref={ref} role="dialog">
+    <div className="popover card" ref={ref} role="dialog" style={picking ? { display: 'none' } : undefined}>
       <b>{title}</b>
       {blurb && <p className="tiny muted" style={{ margin: '2px 0 8px' }}>{blurb}</p>}
+      {pieces && (
+        <div className="ask-pieces">
+          {pieces.list.map((a, k) => (
+            <span key={a.selector} className="anchor-chip ask-piece">
+              <button className="link-btn ellipsis" onClick={() => pieces.focus(a)} title={a.selector}>✎ {k + 1}. {a.label || a.selector}</button>
+              <button className="link-btn" onClick={() => pieces.remove(a.selector)} aria-label="Leave this piece out"><Icon name="close" /></button>
+            </span>
+          ))}
+          <button className="btn sm" onClick={pieces.start} title="Point at a part of the page this is about">
+            <Icon name="pick" /> {pieces.list.length ? 'Pick another' : 'Pick a piece'}
+          </button>
+        </div>
+      )}
       {suggestions && suggestions.length > 0 && (
         <div className="ask-suggest">
           {suggestions.map((x) => (
@@ -281,7 +252,15 @@ export function AskPopover(props: {
       )}
       <textarea autoFocus className="field" rows={3} placeholder={placeholder} value={want} onChange={(e) => setWant(e.target.value)} />
       <div className="row" style={{ marginTop: 8 }}>
-        <AskAiButton label={label} prompt={prompt(want.trim())} disabled={!optional && !want.trim()} onAsk={onClose} />
+        <AskAiButton
+          label={label}
+          prompt={prompt(want.trim())}
+          disabled={!optional && !want.trim()}
+          onAsk={() => {
+            pieces?.clear()
+            onClose()
+          }}
+        />
       </div>
       {children}
     </div>
@@ -293,11 +272,17 @@ export function AskPopoverButton(props: Omit<Parameters<typeof AskPopover>[0], '
   const { button, align = 'right', className = 'btn primary', ...rest } = props
   const [open, setOpen] = useState(false)
   const [ai] = useLastAi()
+  const picking = !!rest.pieces?.picking
   return (
     <span className="pop-anchor">
-      <button className={`${className} ${open ? 'on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button
+        className={`${className} ${open ? 'on' : ''}`}
+        onClick={() => (picking ? rest.pieces!.cancel() : setOpen((o) => !o))}
+        aria-expanded={open}
+        title={picking ? 'Stop picking' : undefined}
+      >
         <span className="ask-mark"><AiMark ai={ai} /></span>
-        {button}
+        {picking ? 'Picking… (Esc)' : button}
       </button>
       {open && (
         <div className={`pop-${align}`}>
@@ -310,6 +295,18 @@ export function AskPopoverButton(props: Omit<Parameters<typeof AskPopover>[0], '
 
 // ---- asking about whatever page you're on ----
 
+/** Pieces of an isle picked for an ask: the isle page owns them, the header's Ask shows them. */
+export interface AskPieces {
+  list: Anchor[]
+  picking: boolean
+  start: () => void
+  cancel: () => void
+  remove: (selector: string) => void
+  clear: () => void
+  /** ring it in the isle */
+  focus: (a: Anchor) => void
+}
+
 /** What the header's Ask button knows about the page you're on. */
 export interface AskTopic {
   /** "this isle", "your data" */
@@ -317,12 +314,16 @@ export interface AskTopic {
   /** what the AI should read first, as the prompt's opening */
   context: string
   suggestions?: string[]
+  pieces?: AskPieces
 }
 
 type TopicSlot = { topic: AskTopic | null; set: (t: AskTopic | null) => void }
 export const AskTopicContext = createContext<TopicSlot>({ topic: null, set: () => {} })
 
-/** A page says what it's about while it's shown; the header's Ask button builds on it. */
+/**
+ * A page says what it's about while it's shown; the header's Ask button builds on it. It's re-sent when
+ * its data changes (functions don't count, so pass stable ones).
+ */
 export function useAskTopic(topic: AskTopic | null) {
   const { set } = useContext(AskTopicContext)
   const key = topic ? JSON.stringify(topic) : ''
@@ -346,10 +347,16 @@ export function HeaderAsk() {
       placeholder={topic ? `What do you want to know or change about ${topic.about}?` : 'e.g. make an isle from my running log, or find isles about city budgets'}
       label="Ask"
       suggestions={topic?.suggestions}
-      prompt={(want) => `${topic?.context ?? general}\n\n${want}`}
+      pieces={topic?.pieces}
+      prompt={(want) => `${topic?.context ?? general}${piecesText(topic?.pieces?.list ?? [])}\n\n${want}`}
     />
   )
 }
+
+const piecesText = (list: Anchor[]) =>
+  list.length
+    ? `\n\nThis is about ${list.length === 1 ? 'one piece' : 'these pieces'} of the page:\n${list.map((a, k) => `${k + 1}. ${a.label ? `"${a.label}" ` : ''}(${a.selector})`).join('\n')}`
+    : ''
 
 export function AskTopicProvider({ children }: { children: ReactNode }) {
   const [topic, set] = useState<AskTopic | null>(null)

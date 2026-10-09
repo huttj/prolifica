@@ -325,6 +325,12 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .ask .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
 .ask-menu { position: fixed; z-index: 70; padding: 4px; min-width: 180px; }
 .header-ask { margin-right: 4px; }
+.btn.icon-btn { padding: 7px 9px; }
+.inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
+.ask-pieces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 8px; }
+.ask-piece { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
+.ask-piece .link-btn { min-width: 0; color: inherit; }
+.ask-piece .icon { width: 12px; height: 12px; }
 .header-ask .ask-mark, .btn .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
 .ask-suggest { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
 .ask-suggest button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink-2); cursor: pointer; text-align: left; }
@@ -332,9 +338,6 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .ask-suggest button.on { border-color: var(--accent-2); background: var(--accent-soft); color: var(--ink); }
 .ask-menu button { display: flex; gap: 8px; align-items: center; width: 100%; border: 0; background: transparent; padding: 7px 9px; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: left; }
 .ask-menu button:hover { background: var(--bg-2); }
-.change-list { list-style: none; counter-reset: ch; padding: 0; margin: 12px 0 0; }
-.change-list li { counter-increment: ch; display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.change-list li::before { content: counter(ch); font: 700 12px var(--font); color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 2px 7px; margin-top: 2px; }
 .panel .tabs { overflow-x: auto; }
 .panel .tabs button { white-space: nowrap; padding: 8px 8px; }
 pre.copy { padding-right: 86px; }
@@ -354,8 +357,6 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .pop-left .popover { left: 0; right: auto; }
 .popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(380px, calc(100vw - 32px)); padding: 14px; box-shadow: var(--shadow-lg); text-align: left; font-weight: 400; }
 .popover textarea { width: 100%; resize: vertical; }
-.changes-pop { width: min(400px, calc(100vw - 32px)); max-height: calc(100dvh - 150px); overflow: auto; }
-.changes-pop .compose { margin-bottom: 0; }
 .pop-alt { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 
 /* ---- markdown, folded notes, json ---- */

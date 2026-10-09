@@ -102,7 +102,7 @@ export function Library() {
       {lib.error && <ErrorBox error={lib.error} />}
       {lib.data && !lib.data.length && (
         <div className="empty">
-          Nothing here yet. Open any isle and press the star, or use <b>Mark a piece</b> to star one chart, control or card.
+          Nothing here yet. Open any isle and press the star, or use its comment button to star one chart, control or card.
         </div>
       )}
       {items.length > 0 && <Board items={items} />}
