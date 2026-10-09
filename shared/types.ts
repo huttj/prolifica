@@ -98,6 +98,8 @@ export interface Isle extends IsleSummary {
   uses: { isle: IsleSummary; selector: string | null; label: string | null }[]
   /** other isles running this very page (the same source, byte for byte) */
   samePage: IsleSummary[]
+  /** Other isles showing the same data, or data made from the same original: its cousins. */
+  sameData: IsleSummary[]
 }
 
 export interface Anchor {

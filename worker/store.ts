@@ -678,6 +678,31 @@ export class Store {
       .all<IsleRow>()
     const samePage = []
     for (const t of twinRows) if (this.canSeeIsle(t)) samePage.push(await this.toSummary(t))
+    // cousins: other isles showing the same data, or data made from the same original (derived-from walked
+    // up to the originals, then down to everything made from them)
+    const { results: cousinRows } = await this.d1
+      .prepare(
+        `WITH RECURSIVE up(id, depth) AS (
+           SELECT value, 0 FROM json_each(?1)
+           UNION
+           SELECT e.dst_id, up.depth + 1 FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+           WHERE up.depth < 24
+         ), roots(id) AS (
+           SELECT id FROM up WHERE NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')
+         ), down(id, depth) AS (
+           SELECT id, 0 FROM roots
+           UNION
+           SELECT e.src_id, down.depth + 1 FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+           WHERE down.depth < 24
+         )
+         SELECT DISTINCT i.* FROM isles i, json_each(i.bindings) j
+         WHERE j.value IN (SELECT id FROM down) AND i.id != ?2 AND i.deleted_at IS NULL
+         ORDER BY i.updated_at DESC LIMIT 30`,
+      )
+      .bind(row.bindings || '{}', id)
+      .all<IsleRow>()
+    const sameData = []
+    for (const c of cousinRows) if (this.canSeeIsle(c)) sameData.push(await this.toSummary(c))
     const uses = []
     for (const u of useRows) {
       if (!this.canSeeIsle(u)) continue
@@ -694,6 +719,7 @@ export class Store {
         childCount,
         uses,
         samePage,
+        sameData,
       },
     }
   }

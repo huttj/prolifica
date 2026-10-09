@@ -616,6 +616,12 @@ function Family({ isle }: { isle: Isle }) {
   const { ancestors, tree } = lineage.data
   const remixes = (n: TreeNode): number => n.children.reduce((t, c) => t + 1 + remixes(c), 0)
   const below = remixes(tree)
+  // cousins: same data, but not already in the line above
+  const inLine = new Set<string>()
+  const walk = (n: TreeNode) => { inLine.add(n.id); n.children.forEach(walk) }
+  ancestors.forEach((a) => inLine.add(a.id))
+  walk(tree)
+  const cousins = (isle.sameData ?? []).filter((x) => !inLine.has(x.id))
   return (
     <div className="stack">
       <div className="row" style={{ gap: 6 }}>
@@ -644,6 +650,17 @@ function Family({ isle }: { isle: Isle }) {
           </>
         )}
       </div>
+      {cousins.length > 0 && (
+        <div>
+          <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Same data as</div>
+          {cousins.map((x) => (
+            <Link key={x.id} to={`/i/${x.id}`} className="piece">
+              <span className="grow ellipsis small">{x.title}</span>
+              <span className="tiny muted">{who(x.owner)}</span>
+            </Link>
+          ))}
+        </div>
+      )}
       {isle.uses.length > 0 && (
         <div>
           <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Borrows from</div>
