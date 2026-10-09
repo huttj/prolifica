@@ -172,7 +172,7 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 
 /* ---- isle page ---- */
 .isle-page { display: flex; flex-direction: column; height: calc(100dvh - 57px); }
-.isle-bar { display: flex; align-items: center; gap: 4px; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+.isle-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
 .isle-bar h1 { font-size: 17px; font-weight: 700; }
 .isle-kind { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--sea-ink); margin-bottom: 1px; }
 .isle-head { min-width: 0; margin-right: 8px; }
@@ -345,6 +345,8 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .nav .wrap { max-width: none; }
 .btn.icon-btn { padding: 6px 8px; }
 .btn.ghost.icon-btn { padding: 6px 5px; }
+/* bare icons sit close together; bordered buttons keep their room */
+.isle-bar .btn.ghost.icon-btn + .btn.ghost.icon-btn { margin-left: -6px; }
 .inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
 .ask-pieces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 8px; }
 .ask-piece { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
