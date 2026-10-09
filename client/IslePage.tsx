@@ -10,7 +10,7 @@ import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
 import { DataSources } from './Sources'
 import {
-  EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, RelationChip, SizedFrame, useAsync, useSession,
+  EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, SizedFrame, useAsync, useSession,
 } from './ui'
 
 type Tab = 'notes' | 'family' | 'data' | 'history'
@@ -227,35 +227,17 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   return (
     <div className={`isle-page ${stale ? 'stale' : ''}`}>
       <div className="isle-bar">
-        <div className="grow" style={{ minWidth: 200 }}>
+        <div className="grow isle-head">
           {i.viewName && <div className="isle-kind">{i.viewName}</div>}
-          <h1 className="ellipsis" title={i.title}>{withoutKind(i.title, i.viewName)}</h1>
-          <div className="sub">
-            <span>by <PersonLink person={i.owner} /></span>
-            <button className="chip" style={{ cursor: 'pointer' }} onClick={() => setTab('history')} title="Version history">
-              v{i.version}
-            </button>
-            {i.parent && (
-              <>
-                <RelationChip relation={i.relation} />
-                <span>from <Link to={`/i/${i.parent.id}`}>{i.parent.title}</Link> by {who(i.parent.owner)}</span>
-              </>
-            )}
-            {i.visibility !== 'public' && (
-              <button className="chip" style={{ cursor: mine ? 'pointer' : 'default' }} onClick={() => mine && setSettingsOpen(true)} title={mine ? 'Change who can see it' : undefined}>
-                <Icon name="lock" /> {i.visibility}
-              </button>
-            )}
-            {i.samePage.length > 0 && (
-              <button className="chip" style={{ cursor: 'pointer' }} onClick={() => setTab('family')} title={`Runs the very same page as ${i.samePage.map((x) => x.title).join(', ')}`}>
-                same page as {i.samePage.length} other{i.samePage.length === 1 ? '' : 's'}
-              </button>
-            )}
-            {i.childCount > 0 && (
-              <button className="chip" style={{ cursor: 'pointer' }} onClick={() => setTab('family')}>
-                {i.childCount} remix{i.childCount === 1 ? '' : 'es'}
-              </button>
-            )}
+          <div className="isle-titleline">
+            <h1 className="ellipsis" title={i.title}>{withoutKind(i.title, i.viewName)}</h1>
+            <span className="isle-meta">
+              by <PersonLink person={i.owner} />
+              {' · '}
+              <button className="link-btn" onClick={() => setTab('history')} title="Version history">v{i.version}</button>
+              {i.parent && <> · from <Link to={`/i/${i.parent.id}`}>{i.parent.title}</Link></>}
+              {i.visibility !== 'public' && <span className="isle-lock" title={VISIBILITY_LABEL[i.visibility]}><Icon name="lock" /></span>}
+            </span>
           </div>
         </div>
         <a className="btn ghost icon-btn" href={frameSrc || i.frameUrl} target="_blank" rel="noreferrer" title="Open alone, in a new tab" aria-label="Open alone">

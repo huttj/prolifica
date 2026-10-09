@@ -172,9 +172,19 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 
 /* ---- isle page ---- */
 .isle-page { display: flex; flex-direction: column; height: calc(100dvh - 57px); }
-.isle-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+.isle-bar { display: flex; align-items: center; gap: 4px; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
 .isle-bar h1 { font-size: 17px; font-weight: 700; }
 .isle-kind { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--sea-ink); margin-bottom: 1px; }
+.isle-head { min-width: 0; margin-right: 8px; }
+.isle-titleline { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; row-gap: 0; }
+.isle-titleline h1 { flex: 0 1 auto; min-width: 0; }
+.isle-meta { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 100%; }
+@media (max-width: 640px) { .isle-head { flex: 1 1 100%; margin: 0 0 4px; } }
+.isle-meta a { color: var(--ink-2); text-decoration: none; font-weight: 600; }
+.isle-meta a:hover, .isle-meta .link-btn:hover { text-decoration: underline; }
+.isle-meta .link-btn { color: inherit; font: inherit; }
+.isle-lock { margin-left: 6px; display: inline-flex; vertical-align: -2px; }
+.isle-lock .icon { width: 13px; height: 13px; }
 .isle-bar .sub { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .isle-bar .sub a { text-decoration: none; font-weight: 600; color: var(--ink-2); }
 .isle-bar .sub a:hover { text-decoration: underline; }
@@ -333,7 +343,8 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .ask-menu { position: fixed; z-index: 70; padding: 4px; min-width: 180px; }
 .header-ask { margin-left: 6px; padding: 5px 10px 5px 8px; gap: 5px; }
 .nav .wrap { max-width: none; }
-.btn.icon-btn { padding: 7px 9px; }
+.btn.icon-btn { padding: 6px 8px; }
+.btn.ghost.icon-btn { padding: 6px 5px; }
 .inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
 .ask-pieces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 8px; }
 .ask-piece { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
