@@ -1201,12 +1201,33 @@ export class Store {
     }
     const tree = await this.dataNode(row, null)
     await this.dataDescendants(tree, { left: 300 }, 0)
+    // the isles that show it, and those that show data made from it (with which)
     const { results } = await this.d1
-      .prepare(`SELECT i.* FROM edges e JOIN isles i ON i.id = e.src_id WHERE e.rel = 'binds' AND e.dst_kind = 'dataset' AND e.dst_id = ? AND i.deleted_at IS NULL ORDER BY i.star_count DESC LIMIT 200`)
+      .prepare(
+        `WITH RECURSIVE down(id, depth) AS (
+           SELECT ?1, 0
+           UNION
+           SELECT e.src_id, down.depth + 1 FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+           WHERE down.depth < 24
+         )
+         SELECT i.*, b.dst_id AS via_id FROM down JOIN edges b ON b.rel = 'binds' AND b.dst_kind = 'dataset' AND b.dst_id = down.id
+         JOIN isles i ON i.id = b.src_id WHERE i.deleted_at IS NULL
+         ORDER BY down.depth, i.star_count DESC LIMIT 200`,
+      )
       .bind(id)
-      .all<IsleRow>()
+      .all<IsleRow & { via_id: string }>()
     const related: TreeNode[] = []
-    for (const r of results) if (this.canSeeIsle(r)) related.push(await this.isleNode(r, 'binds'))
+    const listed = new Set<string>()
+    for (const r of results) {
+      if (listed.has(r.id) || !this.canSeeIsle(r)) continue
+      listed.add(r.id)
+      const node = await this.isleNode(r, 'binds')
+      if (r.via_id !== id) {
+        const v = await this.datasetRow(r.via_id)
+        node.via = v && this.canReadDataset(v) ? { id: v.id, path: v.path } : { id: null, path: null }
+      }
+      related.push(node)
+    }
     return { ancestors, tree, related }
   }
 

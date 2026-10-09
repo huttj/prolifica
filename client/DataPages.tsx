@@ -320,9 +320,7 @@ export function DataDetail({ id, framed = false, onClose, onChanged }: { id: str
 
       <Provenance dataset={d} mine={mine} onChanged={changed} />
 
-      <Preview dataset={d} />
-
-      <div className="section">
+      <div className="section" style={{ marginTop: 0 }}>
         <h2>Isles that show this data</h2>
         {lineage.data && !lineage.data.related.length && <p className="muted small">None yet. Ask your agent to make one, or run it through an existing isle with “Use my data”.</p>}
         <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${framed ? 180 : 220}px, 1fr))` }}>
@@ -330,10 +328,13 @@ export function DataDetail({ id, framed = false, onClose, onChanged }: { id: str
             <Link key={n.id} to={`/i/${n.id}`} className="card pad" >
               <div style={{ fontWeight: 650 }} className="ellipsis">{n.title}</div>
               <div className="small muted">{who(n.owner)} {n.starCount ? `· ★ ${n.starCount}` : ''}</div>
+              {n.via && <div className="tiny muted ellipsis" title={n.via.path ?? undefined}>via {n.via.path ?? 'data made from it'}</div>}
             </Link>
           ))}
         </div>
       </div>
+
+      <Preview dataset={d} />
 
       {hasFamily && (
         <div className="section">

@@ -160,6 +160,8 @@ export interface TreeNode {
   owner: Person
   relation: Relation | 'derived' | 'binds' | null
   starCount?: number
+  /** For an isle listed under data: the derived data it actually shows (null fields when you can't see it). */
+  via?: { id: string | null; path: string | null }
   children: TreeNode[]
 }
 

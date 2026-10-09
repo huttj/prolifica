@@ -650,9 +650,10 @@ function Family({ isle }: { isle: Isle }) {
           </>
         )}
       </div>
-      {cousins.length > 0 && (
+      {Object.values(isle.bindings).some(Boolean) && (
         <div>
-          <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Same data as</div>
+          <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>{cousins.length ? 'Same data as' : 'Its data'}</div>
+          {cousins.length === 0 && <p className="small muted" style={{ margin: 0 }}>{isle.sameData?.length ? 'Only in the line above' : 'Only here'}</p>}
           {cousins.map((x) => (
             <Link key={x.id} to={`/i/${x.id}`} className="piece">
               <span className="grow ellipsis small">{x.title}</span>
