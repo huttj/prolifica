@@ -125,6 +125,8 @@ interface Fam {
   R: number
   /** isles running the very same page, joined by land: each to its nearest already joined */
   land: [Isl, Isl][]
+  /** a remix in the view whose page has been edited since its parent's: a sandbar to its parent */
+  beach: [Isl, Isl][]
 }
 
 interface World {
@@ -145,6 +147,8 @@ interface World {
   viewLinks: [Isl, Isl][]
   /** isles running the very same page, joined by land: each to its nearest already joined */
   pageLinks: [Isl, Isl][]
+  /** same view, page edited since the parent's: joined by a sandbar */
+  beachLinks: [Isl, Isl][]
 }
 
 const CELL = 256
@@ -247,7 +251,7 @@ function buildWorld(chart: SeaChart): World {
     const root = members[0]!
     const inGroup = new Set(members)
     // the group is named for its format (what kind of page), the isles for their content
-    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0, land: [] }
+    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0, land: [], beach: [] }
     for (const m of members) m.label = m.short ?? shortOf(fam.name ? detailOf(m.title, fam.name) : m.title)
     for (const m of members) { m.fam = fam; m.lk = []; m.ld = 0 }
     for (const m of members) if (m !== root) (m.parent && inGroup.has(m.parent) ? m.parent : root).lk.push(m)
@@ -339,7 +343,7 @@ function buildWorld(chart: SeaChart): World {
       cur = best!
     }
   }
-  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks, pageLinks: fams.flatMap((f) => f.land) }
+  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks, pageLinks: fams.flatMap((f) => f.land), beachLinks: fams.flatMap((f) => f.beach) }
 }
 
 /** The isles that run the same page as this one, and those whose data comes from the same original source. */
@@ -478,16 +482,23 @@ function layoutFamily(f: Fam) {
     }
   }
 
+  // a remix that edited its page stays in the view; it's pulled up beside its parent, joined by sand
+  const inFam = new Set(f.members)
+  for (const m of f.members) if (m.parent && inFam.has(m.parent) && m.parent.page !== m.page) f.beach.push([m.parent, m])
+
   // joined isles are pulled in until their coasts meet (some overlap a little, some keep a short neck);
   // everything else is nudged apart (small families only; big ones are already spread)
   if (f.members.length > 1 && f.members.length <= 400) {
     const tied = new Map<Isl, Set<Isl>>()
-    for (const [a, b] of f.land) { (tied.get(a) ?? tied.set(a, new Set()).get(a)!).add(b); (tied.get(b) ?? tied.set(b, new Set()).get(b)!).add(a) }
-    const reach = f.land.map(([a, b]) => (a.r + b.r) * (0.8 + (((a.seed ^ b.seed) >>> 3) % 100) / 100 * 0.14))
+    for (const [a, b] of [...f.land, ...f.beach]) { (tied.get(a) ?? tied.set(a, new Set()).get(a)!).add(b); (tied.get(b) ?? tied.set(b, new Set()).get(b)!).add(a) }
+    const links = [...f.land, ...f.beach]
+    const jitter = (a: Isl, b: Isl) => (((a.seed ^ b.seed) >>> 3) % 100) / 100
+    // land: coasts meet; sand: a short bar of beach between them
+    const reach = [...f.land.map(([a, b]) => (a.r + b.r) * (0.8 + jitter(a, b) * 0.14)), ...f.beach.map(([a, b]) => (a.r + b.r) * (1.15 + jitter(a, b) * 0.15))]
     const move = (m: Isl, dx: number, dy: number) => { if (m !== f.root) { m.x += dx; m.y += dy } }
     for (let it = 0; it < 60; it++) {
       let moved = false
-      f.land.forEach(([a, b], n) => {
+      links.forEach(([a, b], n) => {
         const dx = b.x - a.x
         const dy = b.y - a.y
         const d = Math.hypot(dx, dy) || 0.01
@@ -646,7 +657,10 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number, ma
   })
 }
 
-function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: number; h: number; dpr: number }, t: Theme, hover: Target | null) {
+/** Where each island's name was written, on screen, so pointing at a name is pointing at its island. */
+type Placed = { isle: Isl; box: readonly [number, number, number, number] }
+
+function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: number; h: number; dpr: number }, t: Theme, hover: Target | null, panels: [number, number, number, number][] = []): Placed[] {
   const { w: W, h: H, dpr } = size
   const S = shapes()
   const k = v.k
@@ -757,7 +771,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
    * between them in a neck that pinches in the middle, beach under ground, each in its own colours.
    * Drawn under the islands so each end disappears into its coast.
    */
-  const isthmuses = (pairs: [Isl, Isl][]) => {
+  const isthmuses = (pairs: [Isl, Isl][], sandOnly = false) => {
     base()
     for (const [a, b] of pairs) {
       const ra = a.r * k, rb = b.r * k
@@ -772,7 +786,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       const at = ra + (d - ra - rb) * (0.3 + r() * 0.4)
       const mx = ax + ux * at + -uy * (r() - 0.5) * small * 0.3
       const my = ay + uy * at + ux * (r() - 0.5) * small * 0.3
-      const waist = [small * (0.38 + r() * 0.16), small * (0.38 + r() * 0.16)]
+      const thin = sandOnly ? 0.45 : 1
+      const waist = [small * (0.38 + r() * 0.16) * thin, small * (0.38 + r() * 0.16) * thin]
       const spread = [0.75 + r() * 0.3, 0.75 + r() * 0.3]
       const neck = (grow: number) => {
         ctx.beginPath()
@@ -797,6 +812,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       }
       ctx.fillStyle = t.sand
       neck(1.1)
+      if (sandOnly) continue
       const g = ctx.createLinearGradient(ax, ay, bx, by)
       g.addColorStop(Math.min(0.49, ra / d), t.lands[a.tint]!)
       g.addColorStop(Math.max(0.51, 1 - rb / d), t.lands[b.tint]!)
@@ -815,6 +831,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   ctx.globalAlpha = 1
   ctx.fillStyle = t.sand
   for (const m of shown) blob(m.shape, sx(m.x), sy(m.y), m.r * k * 1.1)
+  isthmuses(w.beachLinks, true)
   isthmuses(w.pageLinks)
   for (const m of shown) {
     ctx.fillStyle = t.lands[m.tint]!
@@ -856,6 +873,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       for (const sh of under) { ctx.globalAlpha = 0.85; blob(sh.shape, sx(sh.x), sy(sh.y), Math.max(sh.rx * k, 4), Math.max(sh.ry * k, 4)) }
       ctx.globalAlpha = 1
     }
+    isthmuses(w.beachLinks.filter(([a, b]) => lit.has(a) && lit.has(b)), true)
     isthmuses(w.pageLinks.filter(([a, b]) => lit.has(a) && lit.has(b)))
     for (const o of lit) {
       if (o.r * k < 1.6) continue
@@ -898,7 +916,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
 
   // labels, most-starred first, never on top of each other: under the island, or wherever there's open
   // water when land runs on under it, or on the island itself when it's ringed by land
-  const taken: [number, number, number, number][] = []
+  // the panels over the map are taken from the start, so no name hides under them
+  const taken: [number, number, number, number][] = [...panels]
   const clear = (a: number, b: number, c: number, d: number) => !taken.some(([p, q, r, s]) => a < r && c > p && b < s && d > q)
   const free = (a: number, b: number, c: number, d: number) => {
     if (!clear(a, b, c, d)) return false
@@ -911,6 +930,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       const ox = sx(o.x), oy = sy(o.y)
       return Math.hypot(ox - Math.max(a, Math.min(c, ox)), oy - Math.max(b, Math.min(d, oy))) < o.r * k * 0.95
     })
+  const placed: Placed[] = []
   const cands = shown
     .filter((m) => m.r * k >= (m.kids.length ? 6 : 9))
     .sort((a, b) => b.stars - a.stars || b.r - a.r)
@@ -924,13 +944,14 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     // titles wrap beside the island; more lines as you get closer
     const lines = m.label ? wrapText(ctx, m.label, Math.max(140, Math.min(220, r * 2.4)), 2) : []
     const cx = sx(m.x), cy = sy(m.y)
-    const sub = r >= 20 || !lines.length ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
+    // who made it shows when you point at it
+    const sub = hover?.isle === m || !lines.length ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
     ctx.font = `500 11px ${t.font}`
     const subW = sub ? ctx.measureText(sub).width : 0
     ctx.font = `600 12px ${t.font}`
     const tw = Math.max(subW, ...lines.map((l) => ctx.measureText(l).width))
     // the block's height, from the first line's top to under its last
-    const bh = (lines.length ? lines.length * 14 : 0) + (sub ? 14 : 0) + 2
+    const bh = (lines.length ? lines.length * 14 : 14) + 2
     const reach = r * 1.12
     const spots: [number, number][] = [
       [cx, cy + reach + 1],
@@ -943,6 +964,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       ?? (r * 2 > tw * 0.8 ? ([cx, cy - bh / 2] as [number, number]) : spots[0]!)
     const [x, top] = pick
     if (!free(...box(pick))) continue
+    placed.push({ isle: m, box: box(pick) })
     const y = top + 12
     const subY = y + lines.length * 14
     ctx.font = `600 12px ${t.font}`
@@ -980,6 +1002,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     ctx.fillText(spaced, x, y)
     ctx.globalAlpha = 1
   }
+  return placed
 }
 
 /** Terraces for an island's stars: 0 → flat, 1 → 1, 2–3 → 2, 4–7 → 3, … up to 6. */
@@ -1018,12 +1041,18 @@ function Sea({ world }: { world: World }) {
   const frame = useRef(0)
   const flight = useRef(0)
   const kMin = useRef(0.05)
+  const names = useRef<Placed[]>([])
 
   const draw = useCallback(() => {
     frame.current = 0
     const c = canvas.current
     if (!c || !theme.current || !size.current.w) return
-    render(c.getContext('2d')!, world, view.current, size.current, theme.current, hoverRef.current)
+    const box = c.getBoundingClientRect()
+    const panels = [...(wrap.current?.querySelectorAll('.sea-title, .sea-search, .sea-zoom') ?? [])].map((el) => {
+      const r = el.getBoundingClientRect()
+      return [r.left - box.left, r.top - box.top, r.right - box.left, r.bottom - box.top] as [number, number, number, number]
+    })
+    names.current = render(c.getContext('2d')!, world, view.current, size.current, theme.current, hoverRef.current, panels)
     if (hoverRef.current) setTick((n) => n + 1)
   }, [world])
   const redraw = useCallback(() => {
@@ -1140,6 +1169,8 @@ function Sea({ world }: { world: World }) {
 
   const hit = useCallback(
     (px: number, py: number): Target | null => {
+      // a name stands for its island
+      for (const n of names.current) if (px >= n.box[0] && px <= n.box[2] && py >= n.box[1] && py <= n.box[3]) return { isle: n.isle }
       const v = view.current
       const { w, h } = size.current
       const x = v.x + (px - w / 2) / v.k
@@ -1317,6 +1348,7 @@ function Sea({ world }: { world: World }) {
         }}
         onKeyDown={onKey}
       />
+      <div className="sea-side">
       <div className="sea-title card">
         <h1>The archipelago</h1>
         <p className="small muted">
@@ -1334,13 +1366,14 @@ function Sea({ world }: { world: World }) {
           <span><b className="hill-key" />higher, more stars</span>
         </div>
       </div>
+      {hover && <HoverCard target={hover} world={world} pinned={pinned} onOpen={() => open(hover)} />}
+      </div>
       <SeaSearch world={world} onPick={goTo} />
       <div className="sea-zoom card">
         <button title="Zoom in (+)" onClick={() => zoomBy(1.6)}>+</button>
         <button title="Zoom out (−)" onClick={() => zoomBy(1 / 1.6)}>−</button>
         <button title="See everything (0)" onClick={() => fit(true)}><Icon name="fit" /></button>
       </div>
-      {hover && <HoverCard target={hover} world={world} view={view.current} size={size.current} pinned={pinned} onOpen={() => open(hover)} />}
     </div>
   )
 }
@@ -1400,17 +1433,9 @@ function SeaSearch({ world, onPick }: { world: World; onPick: (m: Isl) => void }
   )
 }
 
-function HoverCard({ target, world, view, size, pinned, onOpen }: { target: Target; world: World; view: View; size: { w: number; h: number }; pinned: boolean; onOpen: () => void }) {
-  const x = target.isle ? target.isle.x : target.shoal.x
-  const y = target.isle ? target.isle.y : target.shoal.y
-  const r = target.isle ? target.isle.r * 1.2 : target.shoal.rx * 0.6
-  const px = (x - view.x) * view.k + size.w / 2
-  const py = (y - view.y) * view.k + size.h / 2
-  const W = 260
-  const right = px + r * view.k + 14 + W < size.w - 8
-  const left = right ? px + r * view.k + 14 : Math.max(8, px - r * view.k - 14 - W)
-  const top = Math.max(8, Math.min(size.h - 300, py - 60))
-  const style: React.CSSProperties = { left, top, width: W, pointerEvents: pinned ? 'auto' : 'none' }
+/** What you're pointing at, docked under the legend so it never covers the islands around it. */
+function HoverCard({ target, world, pinned, onOpen }: { target: Target; world: World; pinned: boolean; onOpen: () => void }) {
+  const style: React.CSSProperties = { pointerEvents: pinned ? 'auto' : 'none' }
 
   if (target.shoal) {
     const s = target.shoal
