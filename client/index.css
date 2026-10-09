@@ -530,8 +530,9 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .evo-diff .fold { color: var(--muted); background: var(--bg-2); padding: 2px 8px; text-indent: 0; font-style: italic; }
 
 /* evolution as an overlay, with the family graph */
-.evo-scrim { align-items: flex-start; padding: 3vh 16px; overflow: auto; }
-.evo-modal { position: relative; width: 100%; max-width: 1240px; margin: 0 auto; padding: 18px 20px 22px; }
+/* centred when it fits; when it's taller than the window, auto margins collapse and it scrolls from its top */
+.evo-scrim { display: flex; flex-direction: column; padding: 3vh 16px; overflow: auto; }
+.evo-modal { position: relative; width: 100%; max-width: 1240px; margin: auto; padding: 18px 20px 22px; flex: none; }
 .evo-close { position: absolute; top: 10px; right: 10px; }
 .evo-h { font-size: 20px; margin: 0 36px 0 0; }
 .evo-graph { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
