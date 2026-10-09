@@ -713,6 +713,36 @@ export class Store {
   }
 
   /** The original data behind each of an isle's slots (following derived-from up), and how each was collected. */
+  /**
+   * Remixes below an isle (at any depth) that run a different page from it, newest first, one per page:
+   * where a later version of its page may live (one that reads its wording from the data, say), so an
+   * agent rebinding can pick the right one.
+   */
+  async pagesBelow(id: string): Promise<{ row: IsleRow; depth: number }[]> {
+    const row = await this.visibleIsleRow(id)
+    const { results } = await this.d1
+      .prepare(
+        `WITH RECURSIVE below(id, depth) AS (
+           SELECT id, 0 FROM isles WHERE id = ?1
+           UNION ALL SELECT i.id, below.depth + 1 FROM isles i JOIN below ON i.parent_id = below.id WHERE below.depth < 30 AND i.deleted_at IS NULL
+         )
+         SELECT i.*, below.depth AS depth FROM isles i JOIN below ON below.id = i.id
+         WHERE i.id != ?1 AND i.source_blob != ?2 ORDER BY i.updated_at DESC LIMIT 200`,
+      )
+      .bind(row.id, row.source_blob)
+      .all<IsleRow & { depth: number }>()
+    const seen = new Set<string>()
+    const out: { row: IsleRow; depth: number }[] = []
+    for (const r of results) {
+      // unlisted isles stay out of listings unless they're yours
+      if (seen.has(r.source_blob) || !(r.visibility === 'public' || r.owner_id === this.viewer?.id)) continue
+      seen.add(r.source_blob)
+      out.push({ row: r, depth: r.depth })
+      if (out.length >= 10) break
+    }
+    return out
+  }
+
   async isleSources(id: string): Promise<IsleSources> {
     const row = await this.visibleIsleRow(id)
     const bindings = parseJson<Record<string, string>>(row.bindings, {})

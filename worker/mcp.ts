@@ -1,7 +1,10 @@
-import { COLLECTION_METHODS, type Anchor, type DataSource, type IsleSummary, type Visibility } from '../shared/types'
+import { COLLECTION_METHODS, type Anchor, type DataSource, type IsleSummary, type SlotSpec, type Visibility } from '../shared/types'
 import { appOrigin, islesOrigin, quotaFor } from './auth'
 import { checkIsle, shootLater } from './shots'
 import { applyJsonSets, applyTextEdits, EditError, grepLines, type TextEdit } from '../shared/edits'
+import { parseCsv, parseCsvRows } from '../shared/csv'
+import { appendAt, derive, getAt, mergeAt, shapeOf, toCsv, type Fields, type Where } from '../shared/jsondata'
+import { runExpression } from '../shared/transform'
 import { Db, type UserRow } from './db'
 import { Store, StoreError, fmtBytes, type Layer, type SourceInput } from './store'
 
@@ -129,7 +132,27 @@ matching lines; edit_isle applies exact find/replace edits on the server (to you
 or as_remix to publish your own version of someone else's); edit_data sets fields in a JSON dataset by
 path ("city.name", "topics[3].title") or edits text data in place. Then check_isle.
 
+## Big data stays on the server
+Nothing you can do with a path, a field list or a filter should pass through your output.
+- Reading: read_data with shape: true first (keys, array lengths, the fields rows have, a sample row),
+  then path, fields, where and rows to read only what you need. JSON comes back compact.
+- Reshaping: derive_data runs a JSONata expression (jsonata.org) over one dataset ($) or several named
+  ones ($posts, $scores) on the server and saves the result, lineage and expression kept. For example:
+    slim the posts:     messages.{"id": id, "who": author.handle, "text": text, "likes": likes}
+    scores onto posts:  ($by := $scores{$string(i): $}; $posts.messages.$merge([$, $lookup($by, $string(id))]))
+                        (from: {"posts": <export id>, "scores": <scores id>}; index one side by key, as here,
+                        rather than filtering it inside a loop, which is slow on big data)
+    count by category:  messages{category: $count(id)}
+  read_data takes an expression too, to look before you save. select, fields and where are shortcuts.
+- Adding: edit_data append adds rows to an array; merge joins patches onto rows by a key field
+  (key "id", rows [{id: 12, score: 3}]), so you send only your new fields and the text stays put. Build
+  an analysis up in a few appends rather than one huge write_data.
+
 ## Test what you publish
+Before publishing over data you shaped, publish_isle with dry_run: true shows each slot next to the shape
+of the data that would fill it, slots the page reads that nothing fills, and which private data would go
+public. When rebinding, get_isle lists other_pages_below: later versions of the page in its family (one
+may already read its wording from data), so pick the page before you bind.
 check_isle opens an isle in a real browser and returns a screenshot with its script errors, failed
 requests and how each data slot loaded. After every publish_isle, check it (at desktop width, and at
 390 for phones when layout matters). If there are errors, a slot failed, or the page is empty or
@@ -173,6 +196,20 @@ const SOURCE_SCHEMA = {
   additionalProperties: false,
 }
 
+const FIELDS_SCHEMA = {
+  description: 'Keep only these fields of each row (or of the object): ["id", "text", "author.name"] (nested ones keep their nesting), or {"new name": "source.path"} to rename',
+  anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'object', additionalProperties: { type: 'string' } }],
+}
+const WHERE_SCHEMA = {
+  type: 'array',
+  description: 'Keep only rows matching every condition',
+  items: obj({ field: s('Field path in the row, e.g. "likes" or "author.handle"'), op: s('Default eq', { enum: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'exists', 'missing', 'in'] }), value: { description: 'What to compare with (a list for in)' } }, ['field']),
+}
+
+const fieldsOf = (v: unknown): Fields | undefined =>
+  Array.isArray(v) ? v.map(String) : v && typeof v === 'object' ? (Object.fromEntries(Object.entries(v).map(([k, x]) => [k, String(x)])) as Record<string, string>) : undefined
+const whereOf = (v: unknown): Where[] | undefined => (Array.isArray(v) ? (v.filter((w) => w && typeof w === 'object' && typeof w.field === 'string') as Where[]) : undefined)
+
 const drawsOf = (v: unknown) =>
   Array.isArray(v)
     ? v.filter((d) => d && typeof d === 'object' && typeof (d as { isle?: unknown }).isle === 'string').map((d) => ({ isle: String(d.isle), version: Number(d.version) || undefined, note: typeof d.note === 'string' ? d.note : undefined, parts: Array.isArray(d.parts) ? d.parts.map(String) : undefined }))
@@ -208,8 +245,21 @@ const TOOLS = [
   },
   {
     name: 'read_data',
-    description: 'Read one dataset: its details and contents (text formats as text, paged by characters; images as images).',
-    inputSchema: obj({ id: s('Dataset id'), offset: { type: 'integer', description: 'Character offset for long text' }, limit: { type: 'integer', description: 'Characters to return (default 60000)' }, collector_code: { type: 'boolean', description: 'Include the code it was collected with (default true)' } }, ['id']),
+    description:
+      'Read one dataset: its details and contents (text formats as text, paged by characters; images as images). For big JSON or CSV, ask for shape first, then read just the part you need with path, fields, where and rows, or a JSONata expression.',
+    inputSchema: obj({
+      id: s('Dataset id'),
+      shape: { type: 'boolean', description: 'JSON/CSV: instead of the contents, what is in it: keys and types, array lengths, the fields rows have and one sample row' },
+      expression: s('JSON/CSV: a JSONata expression (jsonata.org) to read through, e.g. messages[likes > 10].{"id": id, "text": text} or $count(messages). Instead of path, fields and where.'),
+      path: s('JSON: only what is at this path, e.g. "messages" or "thread.posts[0]"'),
+      fields: FIELDS_SCHEMA,
+      where: WHERE_SCHEMA,
+      rows: s('When the selection is an array: just these rows, e.g. "0-99" (0-based, inclusive)'),
+      compact: { type: 'boolean', description: 'JSON comes back without indentation (default true); false returns the file as stored' },
+      offset: { type: 'integer', description: 'Character offset for long text' },
+      limit: { type: 'integer', description: 'Characters to return (default 60000)' },
+      collector_code: { type: 'boolean', description: 'Include the code it was collected with (default true)' },
+    }, ['id']),
     annotations: { readOnlyHint: true },
   },
   {
@@ -310,12 +360,40 @@ const TOOLS = [
   {
     name: 'edit_data',
     description:
-      'Change a dataset in place without resending it: set or remove fields of JSON data by path ("city.name", "topics[3].title"), or exact find/replace edits on any text data. Keeps its id, description, source and lineage; isles bound to it show the change.',
+      'Change a dataset in place without resending it: set or remove fields of JSON data by path ("city.name", "topics[3].title"), append rows to an array, merge new fields onto rows by a key (send only the scores, the server keeps the text), or exact find/replace edits on any text data. Append and merge work on CSV too. Keeps its id, description, source and lineage; isles bound to it show the change.',
     inputSchema: obj({
       id: s('Dataset id'),
+      append: obj({ path: s('JSON: the array to add to, e.g. "rows" (omit when the data is an array at the top; created if missing)'), rows: { type: 'array', description: 'Rows to add at the end' } }, ['rows']),
+      merge: obj({
+        path: s('JSON: the array whose rows to update (omit when the data is an array at the top)'),
+        key: s('The field that identifies a row, e.g. "id"'),
+        rows: { type: 'array', description: 'Patches, each with the key field plus the fields to set: [{"id": 12, "score": 3}]', items: { type: 'object' } },
+        upsert: { type: 'boolean', description: 'Add patches that match no row as new rows (default: report them)' },
+      }, ['key', 'rows']),
       set: { type: 'array', description: 'For JSON data', items: obj({ path: s('Dot path with [n] for arrays, e.g. "city.name" or "wards[2].members"'), value: { description: 'The new value (any JSON)' }, remove: { type: 'boolean', description: 'Delete it instead' } }, ['path']) },
       edits: { type: 'array', description: 'For any text data (csv, markdown, json as text)', items: obj({ find: s('Exact text to find'), replace: s('What to put instead'), all: { type: 'boolean' } }, ['find', 'replace']) },
     }, ['id']),
+  },
+  {
+    name: 'derive_data',
+    description:
+      'Make a new dataset from data you can read, on the server, without its contents passing through you. Either a JSONata expression (jsonata.org) over one source ($) or several named ones ($posts, $scores: join, reshape, count, anything), or the shortcuts select, fields, where and limit over one source. Saves JSON, or CSV when the path ends in .csv; derived_from is set to the sources and transform keeps the expression, so it can be read and re-run.',
+    inputSchema: obj({
+      from: {
+        description: 'The source: a dataset id (it is $ in the expression), or several as {name: id} (each is $name, and $ is all of them as one object)',
+        anyOf: [{ type: 'string' }, { type: 'object', additionalProperties: { type: 'string' } }],
+      },
+      path: s('Where to save the new data, e.g. "x-threads/bike/thread.json"'),
+      expression: s('JSONata, e.g. messages.{"id": id, "text": text}; see the guide for joins'),
+      select: s('Shortcut, one source: the part to take, e.g. "messages" (default: all of it)'),
+      fields: FIELDS_SCHEMA,
+      where: WHERE_SCHEMA,
+      limit: { type: 'integer', description: 'Shortcut: at most this many rows' },
+      kind: s('json or csv (default: from the path\'s extension)', { enum: ['json', 'csv'] }),
+      description: s('What the new data is, in one short sentence'),
+      transform: s('One sentence saying what it is made of (the expression is added after it for you)'),
+      public: { type: 'boolean', description: 'Make it public now (default: private until a public isle shows it)' },
+    }, ['from', 'path']),
   },
   {
     name: 'check_isle',
@@ -333,8 +411,9 @@ const TOOLS = [
   {
     name: 'publish_isle',
     description:
-      'Publish an isle (an HTML page with data slots), update your own (id), or remix someone\'s (parent). For a rebind (same page, new data) pass from or parent plus bindings and no html. Read guide first.',
+      'Publish an isle (an HTML page with data slots), update your own (id), or remix someone\'s (parent). For a rebind (same page, new data) pass from or parent plus bindings and no html. dry_run checks the bindings against the slots first, publishing nothing. Read guide first.',
     inputSchema: obj({
+      dry_run: { type: 'boolean', description: 'Publish nothing: report each slot with the data that would be bound (its kind and shape next to the slot description), slots the page reads but nothing fills, and which of your private data would become public' },
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
       title: s('Title'),
       short_title: s('One to three words for the map, naming what is particular to this one ("Kennewick", "Bike assault", "OpenAI firings"): the map already shows what kind of page it is'),
@@ -534,11 +613,54 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         return { content: [{ type: 'text', text: JSON.stringify(info) }, { type: 'image', data: b64encode(bytes), mimeType: dataset.contentType }] as Content[], isError: false }
       }
       if (dataset.kind === 'binary' || dataset.kind === 'image') return text({ ...info, note: 'Binary data; not shown as text' })
-      const all = await obj.text()
+      let all = await obj.text()
+      const selection: Record<string, unknown> = {}
+      const structured = dataset.kind === 'json' || dataset.kind === 'csv'
+      const expression = str(args.expression)
+      const slicing = !!(args.shape || expression || str(args.path) || args.fields || args.where || str(args.rows))
+      if (slicing && !structured) throw new StoreError(400, 'shape, expression, path, fields, where and rows work on JSON and CSV data; read text with offset and limit')
+      if (expression && (str(args.path) || args.fields || args.where)) throw new StoreError(400, 'Give an expression, or path, fields and where, not both')
+      if (structured && (slicing || (dataset.kind === 'json' && args.compact !== false))) {
+        let value: unknown
+        try {
+          value = dataset.kind === 'csv' ? parseCsv(all) : JSON.parse(all)
+        } catch {
+          if (slicing) throw new StoreError(400, "That data isn't valid JSON, so it can only be read as text (offset and limit)")
+        }
+        if (value !== undefined) {
+          try {
+            if (args.shape) return text({ ...info, length: all.length, shape: shapeOf(getAt(value, str(args.path))) })
+            let v = expression ? await runExpression(expression, value) : derive(value, { path: str(args.path), fields: fieldsOf(args.fields), where: whereOf(args.where) })
+            if (Array.isArray(v)) {
+              selection.rows_total = v.length
+              if (str(args.rows)) {
+                const m = /^(\d+)\s*-\s*(\d+)$/.exec(str(args.rows)!) ?? /^(\d+)$/.exec(str(args.rows)!)
+                if (!m) throw new StoreError(400, 'rows looks like "0-99"')
+                const a = Number(m[1]), b = Number(m[2] ?? m[1])
+                v = v.slice(a, b + 1)
+                selection.rows = `${a}-${Math.min(b, a + (v as unknown[]).length - 1)}`
+              }
+            }
+            // CSV stays CSV (the smallest way to send rows); JSON goes without indentation
+            all = dataset.kind === 'csv' && Array.isArray(v) && !str(args.path) && !expression ? toCsv(v) : JSON.stringify(v)
+          } catch (e) {
+            if (e instanceof EditError) throw new StoreError(400, e.message)
+            throw e
+          }
+        }
+      }
       const offset = Math.max(0, Number(args.offset) || 0)
       const limit = Math.min(200_000, Math.max(1, Number(args.limit) || 60_000))
       const content = all.slice(offset, offset + limit)
-      return text({ ...info, offset, length: all.length, truncated: offset + limit < all.length, content })
+      const more = offset + limit < all.length
+      // the contents go in their own block, as they are, not escaped inside JSON
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ ...info, ...selection, offset, length: all.length, truncated: more, ...(more ? { next_offset: offset + limit } : {}) }) },
+          { type: 'text', text: content },
+        ] as Content[],
+        isError: false,
+      }
     }
 
     case 'write_data': {
@@ -635,6 +757,13 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         // where its data came from: what someone making their own version will need to collect, and how
         data_sources: (await store.isleSources(id)).sources.map((x) => ({ original: { id: x.dataset.id, path: x.dataset.path }, feeds: x.slots, site: x.site, method: x.method, has_collector: !!x.code, collected_by_person_in_browser: x.selfServe })),
       }
+      // later versions of this page in its family: a remix may carry a better page to rebind (one that reads its wording from data)
+      const below = await store.pagesBelow(id)
+      if (below.length)
+        out.other_pages_below = {
+          hint: 'Remixes below this isle that run a different page from it, newest first. same_view ones adapted this page; if you are rebinding, check whether one fits better.',
+          pages: below.map(({ row: r, depth }) => ({ id: r.id, title: r.title, relation: r.relation, same_view: r.relation === 'rebind', generations_down: depth, version: r.version, note: r.note, updated: new Date(r.updated_at).toISOString(), url: `${app}/i/${r.id}` })),
+        }
       const wantSlice = str(args.grep) || str(args.lines)
       if (wantSlice || args.source !== false) {
         const html = await store.blobText(row.source_blob)
@@ -678,13 +807,34 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       if (dataset.kind === 'image' || dataset.kind === 'binary') throw new StoreError(400, 'edit_data works on text and JSON data')
       const before = await store.blobText(row.blob)
       let after: string
+      const report: Record<string, unknown> = {}
+      const sets = Array.isArray(args.set) && args.set.length ? args.set : null
+      const append = args.append && typeof args.append === 'object' ? (args.append as { path?: string; rows?: unknown[] }) : null
+      const merge = args.merge && typeof args.merge === 'object' ? (args.merge as { path?: string; key?: string; rows?: unknown[]; upsert?: boolean }) : null
+      const structural = (value: unknown) => {
+        if (append) report.appended = { rows: append.rows?.length ?? 0, now: appendAt(value, str(append.path), append.rows as unknown[]).length }
+        if (merge) {
+          const m = mergeAt(value, str(merge.path), String(merge.key ?? ''), merge.rows as unknown[], !!merge.upsert)
+          report.merged = { matched: m.merged, added: m.added, unmatched: m.unmatched.length, ...(m.unmatched.length ? { unmatched_keys: m.unmatched.slice(0, 50) } : {}) }
+        }
+      }
       try {
-        if (Array.isArray(args.set) && args.set.length) {
-          if (dataset.kind !== 'json') throw new EditError('set works on JSON data; use edits for text')
-          let value: unknown
-          try { value = JSON.parse(before) } catch { throw new EditError('That dataset isn\'t valid JSON, so set can\'t be used; use edits') }
-          const pretty = /\n\s+["{[\]]/.test(before.slice(0, 2000))
-          after = JSON.stringify(applyJsonSets(value, args.set as never), null, pretty ? 2 : undefined)
+        if (sets || append || merge) {
+          if (dataset.kind === 'json') {
+            let value: unknown
+            try { value = JSON.parse(before) } catch { throw new EditError('That dataset isn\'t valid JSON, so set, append and merge can\'t be used; use edits') }
+            const pretty = /\n\s+["{[\]]/.test(before.slice(0, 2000))
+            if (sets) value = applyJsonSets(value, sets as never)
+            structural(value)
+            after = JSON.stringify(value, null, pretty ? 2 : undefined)
+          } else if (dataset.kind === 'csv' && !sets) {
+            if (str(append?.path) || str(merge?.path)) throw new EditError('CSV is one table: leave path out')
+            // cells stay the strings they were, so nothing is reformatted but the rows you touch
+            const [header = [], ...body] = parseCsvRows(before.replace(/^\uFEFF/, ''))
+            const rows: Record<string, unknown>[] = body.map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ''])))
+            structural(rows)
+            after = toCsv(rows, header)
+          } else throw new EditError('set works on JSON data, append and merge on JSON or CSV; use edits for text')
           if (Array.isArray(args.edits) && args.edits.length) after = applyTextEdits(after, args.edits as TextEdit[]).text
         } else after = applyTextEdits(before, args.edits as TextEdit[]).text
       } catch (e) {
@@ -693,7 +843,71 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       }
       if (dataset.kind === 'json') { try { JSON.parse(after) } catch { throw new StoreError(400, 'Those edits would leave the JSON invalid, so nothing was changed') } }
       const d = await store.writeDataset({ id: dataset.id, path: dataset.path, bytes: new TextEncoder().encode(after), contentType: dataset.contentType })
-      return text({ id: d.id, path: d.path, size: fmtBytes(d.size), was: fmtBytes(before.length), url: `${app}/d/${d.id}` })
+      return text({ id: d.id, path: d.path, size: fmtBytes(d.size), was: fmtBytes(before.length), ...report, url: `${app}/d/${d.id}` })
+    }
+
+    case 'derive_data': {
+      const path = str(args.path)
+      if (!path) throw new StoreError(400, 'path is required: where to save the new data')
+      const named: [string, string][] =
+        typeof args.from === 'string' ? [['', args.from]] : args.from && typeof args.from === 'object' ? Object.entries(args.from).map(([k, v]) => [k, String(v)]) : []
+      if (!named.length) throw new StoreError(400, 'from is a dataset id, or {name: id} for several')
+      if (named.length > 8) throw new StoreError(400, 'At most 8 sources')
+      for (const [k] of named) if (k && !/^[A-Za-z_]\w{0,30}$/.test(k)) throw new StoreError(400, `"${k}" can't be a variable name; use letters, digits and _`)
+      const sources = []
+      for (const [name, id] of named) {
+        const { dataset: src, row } = await store.getDataset(id)
+        if (src.kind !== 'json' && src.kind !== 'csv') throw new StoreError(400, `${src.path}: derive_data works on JSON and CSV data`)
+        const raw = await store.blobText(row.blob)
+        let value: unknown
+        try { value = src.kind === 'csv' ? parseCsv(raw) : JSON.parse(raw) } catch { throw new StoreError(400, `${src.path} isn't valid JSON`) }
+        sources.push({ name, src, value })
+      }
+      const expression = str(args.expression)
+      const fields = fieldsOf(args.fields)
+      const where = whereOf(args.where)
+      const limit = Number(args.limit) || undefined
+      const sugar = !!(str(args.select) || fields || where?.length || limit)
+      let out: unknown
+      try {
+        if (expression) {
+          if (sugar) throw new EditError('Give an expression, or select, fields, where and limit, not both')
+          const single = sources.length === 1 && !sources[0]!.name
+          const all = Object.fromEntries(sources.map((x) => [x.name, x.value]))
+          out = await runExpression(expression, single ? sources[0]!.value : all, single ? {} : all)
+        } else {
+          if (sources.length > 1) throw new EditError('With several sources, say how to combine them in an expression')
+          out = derive(sources[0]!.value, { path: str(args.select), fields, where, limit })
+        }
+      } catch (e) {
+        if (e instanceof EditError) throw new StoreError(400, e.message)
+        throw e
+      }
+      const kind = args.kind === 'csv' || args.kind === 'json' ? args.kind : /\.csv$/i.test(path) ? 'csv' : 'json'
+      if (kind === 'csv' && !Array.isArray(out)) throw new StoreError(400, 'CSV needs rows: make the result an array, or save as JSON')
+      const content = kind === 'csv' ? toCsv(out as unknown[]) : JSON.stringify(out)
+      const from = sources.map((x) => (x.name ? `$${x.name} = ${x.src.path}` : x.src.path)).join(', ')
+      const said = expression
+        ? `${str(args.transform)?.replace(/\.$/, '') ?? 'Made with a JSONata expression'}, from ${from}.\n\n${expression}`
+        : str(args.transform) ??
+          `${[
+            str(args.select) ? `Took ${str(args.select)}` : 'Took all of it',
+            where?.length ? `kept the rows where ${where.map((w) => `${w.field} ${w.op ?? 'eq'}${w.value === undefined ? '' : ' ' + JSON.stringify(w.value)}`).join(' and ')}` : '',
+            limit ? `the first ${limit}` : '',
+            fields ? `with only ${Array.isArray(fields) ? fields.join(', ') : Object.entries(fields).map(([to, f]) => (to === f ? to : `${f} as ${to}`)).join(', ')}` : '',
+          ].filter(Boolean).join(', ')}, from ${from}.`
+      const d = await store.writeDataset({
+        path, bytes: new TextEncoder().encode(content), contentType: kind === 'csv' ? 'text/csv' : 'application/json',
+        description: str(args.description), transform: said,
+        derivedFrom: sources.map((x) => x.src.id), public: bool(args.public),
+      })
+      const { bytes: used } = await store.usage(user.id)
+      return text({
+        id: d.id, path: d.path, kind: d.kind, size: fmtBytes(d.size), rows: Array.isArray(out) ? out.length : undefined,
+        from: sources.map((x) => ({ ...(x.name ? { as: '$' + x.name } : {}), id: x.src.id, path: x.src.path, size: fmtBytes(x.src.size) })),
+        sample: Array.isArray(out) ? out.slice(0, 2) : undefined,
+        public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left,
+      })
     }
 
     case 'check_isle': {
@@ -712,6 +926,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     }
 
     case 'publish_isle': {
+      if (args.dry_run) return text(await dryRun(store, user, args))
       const { isle, madePublic } = await store.publishIsle({
         id: str(args.id),
         html: typeof args.html === 'string' ? args.html : undefined,
@@ -799,5 +1014,51 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
 
     default:
       throw new StoreError(400, `Unknown tool ${name}`)
+  }
+}
+
+/** What publish_isle would bind, checked against the slots, with nothing published. */
+async function dryRun(store: Store, user: UserRow, args: Record<string, unknown>) {
+  const basisId = str(args.id) ?? str(args.from) ?? str(args.parent)
+  const basis = basisId ? await store.getIsle(basisId) : null
+  const slots = (args.slots && typeof args.slots === 'object' ? args.slots : (basis?.isle.slots ?? {})) as Record<string, SlotSpec>
+  const bindings: Record<string, string> =
+    args.bindings && typeof args.bindings === 'object'
+      ? Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)]))
+      : Object.fromEntries(Object.entries(basis?.isle.bindings ?? {}).flatMap(([k, d]) => (d ? [[k, d.id]] : [])))
+  const visibility = str(args.visibility) ?? (str(args.id) && basis ? basis.isle.visibility : 'public')
+  const html = typeof args.html === 'string' ? args.html : basis ? await store.blobText(basis.row.source_blob) : ''
+  const read = new Set([...html.matchAll(/prolifica\.(?:data|dataUrl)\(\s*['"`]([\w-]+)['"`]/g)].map((m) => m[1]!))
+  const problems: string[] = []
+  const report = []
+  const madePublic: string[] = []
+  for (const slot of [...new Set([...Object.keys(slots), ...Object.keys(bindings), ...read])]) {
+    const spec = slots[slot]
+    const entry: Record<string, unknown> = { slot, expects: spec ? { kind: spec.kind ?? 'any', description: spec.description ?? null } : null, page_reads_it: html ? read.has(slot) : undefined }
+    if (!spec) problems.push(read.has(slot) ? `the page reads slot "${slot}" but it isn't declared in slots` : `"${slot}" is bound but isn't a declared slot`)
+    const did = bindings[slot]
+    if (!did) {
+      if (spec) problems.push(`slot "${slot}" has no data bound`)
+    } else {
+      try {
+        const { dataset, row } = await store.getDataset(did)
+        entry.data = { id: dataset.id, path: dataset.path, kind: dataset.kind, size: fmtBytes(dataset.size), public: dataset.public }
+        if (spec?.kind && spec.kind !== 'any' && spec.kind !== dataset.kind) problems.push(`slot "${slot}" expects ${spec.kind} but ${dataset.path} is ${dataset.kind}`)
+        if (visibility !== 'private' && !dataset.public && row.owner_id === user.id) madePublic.push(dataset.path)
+        if ((dataset.kind === 'json' || dataset.kind === 'csv') && dataset.size <= 4 * 1024 * 1024) {
+          const raw = await store.blobText(row.blob)
+          try { entry.shape = shapeOf(dataset.kind === 'csv' ? parseCsv(raw) : JSON.parse(raw)) } catch { problems.push(`${dataset.path} isn't valid ${dataset.kind.toUpperCase()}`) }
+        }
+      } catch (e) {
+        problems.push(`slot "${slot}": ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    report.push(entry)
+  }
+  return {
+    dry_run: true, published: false, ok: !problems.length, problems, visibility,
+    would_make_public: madePublic,
+    slots: report,
+    next: 'Compare each shape with what its slot description asks for; fix the data (derive_data, edit_data) and publish without dry_run.',
   }
 }
