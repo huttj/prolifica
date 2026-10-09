@@ -33,8 +33,17 @@ make here is public by default and can be remixed by anyone.
 ## Data
 - Each person has a few MB (see whoami). Data is any file: csv, json, markdown, text, images.
 - Paths are folders: "tweets/2024.csv". Writing to an existing path replaces it.
-- A transformation is just new data with derived_from (the inputs) and transform (what you
-  did, in a sentence or the prompt itself). Keep the original; derive, don't overwrite.
+- Organize as it goes in. Before writing, list_data to see the person's folders and put new data
+  where it belongs: one folder per subject or collection ("x-threads/bike/"), the raw capture and
+  what you derived from it side by side, short lowercase names that say what's inside
+  ("thread.json", "analysis.json", not "data2.json"). If the layout has drifted, suggest a tidier
+  one; update_data with a new path moves a file without touching its contents or lineage.
+- A transformation is just new data with derived_from (the inputs) and transform. Write the
+  transform as one plain sentence saying what you did; if a prompt did it, add the prompt after a
+  blank line (people see the sentence, the prompt is folded away). Keep the original; derive,
+  don't overwrite.
+- Keep descriptions short: one or two sentences for data, two to four for an isle, split into short
+  paragraphs with blank lines. Say what it is and what it shows; leave instructions and prompts out.
 - Say how original data was collected with source: url (where), method (bookmarklet,
   extension, userscript, agent, script, api, upload, manual, other), collected_at, notes
   (what's in and what was left out) and code: the bookmarklet, scraper or script itself, in
@@ -212,9 +221,9 @@ const TOOLS = [
         content: s('The contents, as text (csv, json, markdown, ...)'),
         base64: s('Or the contents base64-encoded, for images and other binary files'),
         content_type: s('MIME type, when the extension does not say'),
-        description: s('What this is, in a sentence: shape, columns, source'),
+        description: s('What this is, in one short sentence: shape, columns, source'),
         derived_from: { type: 'array', items: { type: 'string' }, description: 'Ids of the datasets this was made from' },
-        transform: s('How it was made from those (the prompt or a sentence)'),
+        transform: s('How it was made from those: one sentence first; if a prompt was used, add it after a blank line (it is shown folded)'),
         public: { type: 'boolean', description: 'Make it public now (default: private until a public isle shows it)' },
         source: SOURCE_SCHEMA,
         id: s('Replace this dataset (instead of going by path)'),
@@ -224,8 +233,8 @@ const TOOLS = [
   },
   {
     name: 'update_data',
-    description: 'Rename/move a dataset, change its description or provenance (source), or make it public/private, without touching its contents.',
-    inputSchema: obj({ id: s('Dataset id'), path: s('New path'), description: s('New description'), public: { type: 'boolean' }, source: SOURCE_SCHEMA }, ['id']),
+    description: 'Rename/move a dataset (to reorganize folders), change its description, transform or provenance (source), or make it public/private, without touching its contents.',
+    inputSchema: obj({ id: s('Dataset id'), path: s('New path'), description: s('New description: one or two short sentences'), transform: s('New transform (derived data): a sentence, then a blank line and the prompt if there was one'), public: { type: 'boolean' }, source: SOURCE_SCHEMA }, ['id']),
   },
   {
     name: 'delete_data',
@@ -316,7 +325,7 @@ const TOOLS = [
       title: s('Title'),
       short_title: s('One to three words for the map, naming what is particular to this one ("Kennewick", "Bike assault", "OpenAI firings"): the map already shows what kind of page it is'),
       view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s; give it for a new page or when a remix makes a different kind of page.'),
-      description: s('What it shows and what data shape it expects'),
+      description: s('What it shows, in two to four short sentences (blank lines between paragraphs). The data shape it expects goes in the slot descriptions, not here.'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
       bindings: { type: 'object', description: 'Slot name -> dataset id', additionalProperties: { type: 'string' } },
       parent: s('The isle this builds on (sets the lineage)'),
@@ -413,6 +422,12 @@ export async function handleMcp(request: Request, env: Env, userId: string, ctx?
   if (Array.isArray(rpc)) return fail(null, -32600, 'One request at a time, please', 400)
   if (!rpc || rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string') return fail(null, -32600, 'Invalid request', 400)
   const params = rpc.params ?? {}
+  // remember that this person's AI is connected (once a day is plenty)
+  if (!user.mcp_seen_at || Date.now() - user.mcp_seen_at > 86_400_000) {
+    const seen = new Db(env.DB).markMcpSeen(user.id)
+    if (ctx) ctx.waitUntil(seen)
+    else await seen
+  }
 
   switch (rpc.method) {
     case 'initialize':
@@ -529,7 +544,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     }
 
     case 'update_data': {
-      const d = await store.updateDatasetMeta(String(args.id ?? ''), { path: str(args.path), description: typeof args.description === 'string' ? args.description : undefined, public: bool(args.public), source: sourceOf(args.source) })
+      const d = await store.updateDatasetMeta(String(args.id ?? ''), { path: str(args.path), description: typeof args.description === 'string' ? args.description : undefined, transform: typeof args.transform === 'string' ? args.transform : undefined, public: bool(args.public), source: sourceOf(args.source) })
       return text({ id: d.id, path: d.path, description: d.description, public: d.public, source: sourceBrief(d.source), url: `${app}/d/${d.id}` })
     }
 

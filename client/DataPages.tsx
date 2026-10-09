@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { parseCsvRows } from '../shared/csv'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type CollectionMethod, type Dataset, type TreeNode } from '../shared/types'
@@ -6,8 +6,9 @@ import { ago, api, fmtBytes, type SourcePatch, who } from './api'
 import { JsonView } from './JsonView'
 import { FoldedMarkdown, Markdown } from './Markdown'
 import { navigate } from './navigate'
+import { AskPopoverButton, useAskTopic } from './ask'
 import { DataTree } from './DataTree'
-import { Legend, ThreadView } from './Tree'
+import { ThreadView } from './Tree'
 import { ErrorBox, Icon, Link, Modal, PersonLink, useAsync, useSession } from './ui'
 
 export function UsageBar() {
@@ -23,12 +24,31 @@ export function UsageBar() {
   )
 }
 
+const REORGANIZE = (origin: string) =>
+  `Using the Prolifica connector (${origin}/mcp), review how my Prolifica data is organized and tidy it up.
+
+1. list_data for all of it (read_data only where you need to see what a file holds).
+2. Propose a layout: one folder per subject or collection, each raw capture and what was derived from it side by side, short lowercase names that say what's inside. Flag duplicates and leftovers, but don't delete anything.
+3. Also fix descriptions (one or two plain sentences: what it is, its shape) and transforms (one sentence saying what was done; if a prompt did it, keep the prompt after a blank line).
+4. Show me the plan as a before → after list first. When I say go, apply it with update_data (moving a path keeps its contents, lineage and every isle bound to it).`
+
 export function MyData() {
   const { me, loading, refresh, toast } = useSession()
   const list = useAsync(() => (me ? api.data() : Promise.resolve([] as Dataset[])), [me?.id])
   const [over, setOver] = useState(false)
   const [folder, setFolder] = useState('')
   const [busy, setBusy] = useState(false)
+  // the data open in the side panel, kept in the URL (?d=) so a reload or a shared link reopens it
+  const [openId, setOpenIdState] = useState<string | null>(() => new URLSearchParams(location.search).get('d'))
+  const setOpenId = (id: string | null) => {
+    setOpenIdState(id)
+    history.replaceState(null, '', id ? `/data?d=${id}` : '/data')
+  }
+  useAskTopic({
+    about: 'your data',
+    context: `Using the Prolifica connector (${location.origin}/mcp), look at my Prolifica data (list_data).`,
+    suggestions: ['Reorganize my folders and names', 'Make an isle from some of it', 'What could I make from this?'],
+  })
 
   if (!me && !loading) {
     navigate('/login?next=/data', { replace: true })
@@ -59,7 +79,21 @@ export function MyData() {
           <h1>My data</h1>
           <p className="muted" style={{ margin: '4px 0 0' }}>Files your isles read. Private until a public isle shows them.</p>
         </div>
-        <UsageBar />
+        <div className="stack" style={{ gap: 8, alignItems: 'flex-end' }}>
+          <UsageBar />
+          {(list.data?.length ?? 0) > 1 && (
+            <AskPopoverButton
+              className="btn sm"
+              button="Reorganize"
+              title="Reorganize your data"
+              blurb="Your AI looks over every folder, name, description and transform, shows you a tidier layout, and moves things only once you agree. Contents, lineage and isles stay as they are."
+              placeholder="Anything in particular? (optional) e.g. group by site, or keep tweets/ as it is"
+              label="Reorganize with"
+              optional
+              prompt={(want) => REORGANIZE(location.origin) + (want ? `\n\nAlso: ${want}` : '')}
+            />
+          )}
+        </div>
       </div>
 
       <div
@@ -86,10 +120,34 @@ export function MyData() {
 
       <div style={{ marginTop: 16 }}>
         {list.error && <ErrorBox error={list.error} />}
-        {list.data && <DataTree datasets={list.data} storageKey="data" />}
+        {list.data && <DataTree datasets={list.data} storageKey="data" onOpen={(d) => setOpenId(d.id)} selected={openId} />}
       </div>
       <div style={{ height: 60 }} />
+      {openId && <DataPanel id={openId} onClose={() => setOpenId(null)} onChanged={() => { list.reload(); refresh() }} />}
     </div>
+  )
+}
+
+/** One dataset in a side panel over the page, with a way out to its own page. */
+export function DataPanel({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged?: () => void }) {
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.scrim') && onClose()
+    window.addEventListener('keydown', on)
+    return () => window.removeEventListener('keydown', on)
+  }, [onClose])
+  return (
+    <aside className="data-panel card" aria-label="Data">
+      <DataDetail key={id} id={id} framed onClose={onClose} onChanged={onChanged} />
+    </aside>
+  )
+}
+
+/** One dataset in a dialog (from an isle's Data tab). */
+export function DataModal({ id, onClose }: { id: string; onClose: () => void }) {
+  return (
+    <Modal onClose={onClose} wide>
+      <DataDetail id={id} framed onClose={onClose} />
+    </Modal>
   )
 }
 
@@ -131,40 +189,93 @@ function chainData(ancestors: TreeNode[], subject: TreeNode): TreeNode[] {
 }
 
 export function DataPage({ id }: { id: string }) {
+  useAskTopic({
+    about: 'this data',
+    context: `Using the Prolifica connector (${location.origin}/mcp), read dataset ${id} (${location.origin}/d/${id}) with read_data.`,
+    suggestions: ['Make an isle that shows it', 'Clean it up', 'Summarize what is in it'],
+  })
+  return (
+    <div className="wrap">
+      <DataDetail id={id} />
+      <div style={{ height: 60 }} />
+    </div>
+  )
+}
+
+/** A transform: its first paragraph, with the rest (usually the prompt that did it) folded away. */
+function Transform({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const t = text.trim()
+  const cut = t.search(/\n\s*\n/)
+  const head = cut > 0 ? t.slice(0, cut) : t
+  const rest = cut > 0 ? t.slice(cut).trim() : ''
+  return (
+    <div className="transform">
+      {rest ? <span>{head}</span> : <FoldedMarkdown text={head} lines={2} />}
+      {rest && (
+        <>
+          {' '}
+          <button className="link-btn tiny" onClick={() => setOpen((o) => !o)}>{open ? 'Hide the prompt' : 'Show the prompt'}</button>
+          {open && <pre className="preview transform-rest">{rest}</pre>}
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Everything about one dataset. On its own page, or `framed` in a side panel or dialog, where it gets
+ * a smaller head with buttons to open its full page and to close.
+ */
+export function DataDetail({ id, framed = false, onClose, onChanged }: { id: string; framed?: boolean; onClose?: () => void; onChanged?: () => void }) {
   const { me, toast, refresh } = useSession()
   const ds = useAsync(() => api.dataset(id), [id, me?.id])
   const lineage = useAsync(() => api.dataLineage(id), [id, me?.id])
-  if (ds.error) return <div className="wrap" style={{ paddingTop: 30 }}><ErrorBox error={ds.error} /></div>
-  if (!ds.data) return <div className="wrap muted" style={{ paddingTop: 30 }}>Loading…</div>
+  if (ds.error) return <div style={{ paddingTop: 30 }}><ErrorBox error={ds.error} /></div>
+  if (!ds.data) return <div className="muted" style={{ paddingTop: 30 }}>Loading…</div>
   const d = ds.data
   const mine = me?.id === d.owner.id
   const hasFamily = lineage.data && (lineage.data.ancestors.length > 0 || lineage.data.tree.children.length > 0)
+  const changed = () => {
+    ds.reload()
+    onChanged?.()
+  }
 
+  const title = (
+      <div className="row">
+        <span className="kind">{d.kind}</span>
+        <h1 className="grow ellipsis" style={{ fontSize: framed ? 18 : 24 }} title={d.path}>{d.path}</h1>
+        {framed && (
+          <>
+            <Link to={`/d/${d.id}`} className="btn ghost sm" title="Open its full page"><Icon name="expand" /> <span className="hide-sm">Full page</span></Link>
+            {onClose && <button className="btn ghost sm" onClick={onClose} aria-label="Close"><Icon name="close" /></button>}
+          </>
+        )}
+      </div>
+  )
   return (
-    <div className="wrap">
-      <div className="page-head">
-        <div className="row">
-          <span className="kind">{d.kind}</span>
-          <h1 className="grow ellipsis" style={{ fontSize: 24 }}>{d.path}</h1>
-        </div>
+    <div className={framed ? 'data-detail framed' : 'data-detail'}>
+      {framed && <div className="data-detail-bar">{title}</div>}
+      <div className={framed ? 'data-detail-head' : 'page-head'}>
+        {!framed && title}
         <div className="row small muted" style={{ marginTop: 6 }}>
           <span>by <PersonLink person={d.owner} /></span>
           <span>· {fmtBytes(d.size)}</span>
           <span>· updated {ago(d.updatedAt)}</span>
           {d.public ? <span className="chip">public</span> : <span className="chip"><Icon name="lock" /> private</span>}
         </div>
-        {d.description && <p style={{ margin: '10px 0 0' }}>{d.description}</p>}
+        {d.description && <div style={{ margin: '10px 0 0' }}><FoldedMarkdown text={d.description} lines={4} /></div>}
         {d.derivedFrom.length > 0 && (
-          <p className="small" style={{ margin: '8px 0 0' }}>
+          <div className="small" style={{ margin: '8px 0 0' }}>
             Derived from {d.derivedFrom.map((p, k) => <span key={p.id}>{k ? ', ' : ''}<Link to={`/d/${p.id}`}>{p.path}</Link></span>)}
-            {d.transform && <span className="muted"> — “{d.transform}”</span>}
-          </p>
+            {d.transform && <div className="muted" style={{ marginTop: 2 }}><Transform text={d.transform} /></div>}
+          </div>
         )}
       </div>
 
       {mine && (
         <div className="row" style={{ marginBottom: 14 }}>
-          <button className="btn sm" onClick={async () => { await api.updateData(d.id, { public: !d.public }); ds.reload() }}>
+          <button className="btn sm" onClick={async () => { await api.updateData(d.id, { public: !d.public }); changed() }}>
             Make {d.public ? 'private' : 'public'}
           </button>
           <label className="btn sm">
@@ -178,7 +289,7 @@ export function DataPage({ id }: { id: string }) {
                 try {
                   await api.upload(d.path, f)
                   toast('Replaced')
-                  ds.reload()
+                  changed()
                   refresh()
                 } catch (err) {
                   toast((err as Error).message)
@@ -194,7 +305,10 @@ export function DataPage({ id }: { id: string }) {
                 await api.deleteData(d.id)
                 toast('Deleted')
                 refresh()
-                navigate('/data')
+                if (framed && onClose) {
+                  onChanged?.()
+                  onClose()
+                } else navigate('/data')
               } catch (err) {
                 toast((err as Error).message)
               }
@@ -205,14 +319,14 @@ export function DataPage({ id }: { id: string }) {
         </div>
       )}
 
-      <Provenance dataset={d} mine={mine} onChanged={ds.reload} />
+      <Provenance dataset={d} mine={mine} onChanged={changed} />
 
       <Preview dataset={d} />
 
       <div className="section">
         <h2>Isles that show this data</h2>
         {lineage.data && !lineage.data.related.length && <p className="muted small">None yet. Ask your agent to make one, or run it through an existing isle with “Use my data”.</p>}
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+        <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${framed ? 180 : 220}px, 1fr))` }}>
           {lineage.data?.related.map((n) => (
             <Link key={n.id} to={`/i/${n.id}`} className="card pad" >
               <div style={{ fontWeight: 650 }} className="ellipsis">{n.title}</div>
@@ -225,11 +339,9 @@ export function DataPage({ id }: { id: string }) {
       {hasFamily && (
         <div className="section">
           <h2>Data family</h2>
-          <Legend data />
           <ThreadView roots={chainData(lineage.data!.ancestors, lineage.data!.tree)} current={d.id} />
         </div>
       )}
-      <div style={{ height: 60 }} />
     </div>
   )
 }

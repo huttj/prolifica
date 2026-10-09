@@ -478,15 +478,22 @@ export class Store {
     return (await this.getDataset(id)).dataset
   }
 
-  async updateDatasetMeta(id: string, patch: { path?: string; description?: string | null; public?: boolean; source?: SourceInput }): Promise<Dataset> {
+  async updateDatasetMeta(id: string, patch: { path?: string; description?: string | null; transform?: string | null; public?: boolean; source?: SourceInput }): Promise<Dataset> {
     const me = this.requireViewer()
     const row = await this.datasetRow(id)
     if (!row || row.owner_id !== me.id) fail(404, `You have no data with id ${id}`)
     const path = patch.path !== undefined ? normalizePath(patch.path) : row!.path
     try {
       await this.d1
-        .prepare('UPDATE datasets SET path = ?, description = ?, public = ?, updated_at = ? WHERE id = ?')
-        .bind(path, patch.description !== undefined ? patch.description : row!.description, patch.public !== undefined ? (patch.public ? 1 : 0) : row!.public, Date.now(), id)
+        .prepare('UPDATE datasets SET path = ?, description = ?, transform = ?, public = ?, updated_at = ? WHERE id = ?')
+        .bind(
+          path,
+          patch.description !== undefined ? patch.description : row!.description,
+          patch.transform !== undefined ? patch.transform : row!.transform,
+          patch.public !== undefined ? (patch.public ? 1 : 0) : row!.public,
+          Date.now(),
+          id,
+        )
         .run()
     } catch (e) {
       if (String(e).includes('UNIQUE')) fail(409, `You already have data at ${path}`)

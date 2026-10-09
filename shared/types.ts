@@ -13,6 +13,8 @@ export interface Me extends Person {
   usage: number
   /** null: no limit */
   quota: number | null
+  /** their AI has reached Prolifica's MCP server at least once */
+  connected: boolean
 }
 
 export type DataKind = 'csv' | 'json' | 'text' | 'markdown' | 'image' | 'binary'

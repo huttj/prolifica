@@ -53,7 +53,7 @@ function OpenConnector({ ai, url }: { ai: AiId; url: string }) {
   )
 }
 
-function ConnectSteps({ token }: { token?: string }) {
+export function ConnectSteps({ token }: { token?: string }) {
   return (
     <div className="stack">
       <div>

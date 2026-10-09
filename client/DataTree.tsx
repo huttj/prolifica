@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type Dataset } from '../shared/types'
 import { ago, fmtBytes } from './api'
+import { onLinkClick } from './navigate'
 import { Link } from './ui'
 
 /**
@@ -63,7 +64,7 @@ const readOpen = (key: string) => {
 
 type Pick = { chosen: Set<string>; setChosen: (ids: string[], on: boolean) => void }
 
-export function DataTree({ datasets, storageKey, pick, compact = false, empty }: {
+export function DataTree({ datasets, storageKey, pick, compact = false, empty, onOpen, selected }: {
   datasets: Dataset[]
   /** where the open folders are remembered */
   storageKey: string
@@ -71,6 +72,10 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty }:
   pick?: Pick
   compact?: boolean
   empty?: React.ReactNode
+  /** a plain click opens the data here (a side panel) instead of going to its page */
+  onOpen?: (d: Dataset) => void
+  /** the one open in the side panel */
+  selected?: string | null
 }) {
   const [q, setQ] = useState('')
   const [site, setSite] = useState('')
@@ -162,7 +167,17 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty }:
         </label>
       )
     return (
-      <Link key={d.id} to={`/d/${d.id}`} className="file">
+      <a
+        key={d.id}
+        href={`/d/${d.id}`}
+        className={`file ${selected === d.id ? 'on' : ''}`}
+        onClick={(e) => {
+          if (onOpen && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+            e.preventDefault()
+            onOpen(d)
+          } else onLinkClick(e)
+        }}
+      >
         <span style={{ width: depth * 16, flex: 'none', marginRight: -10 }} aria-hidden="true" />
         <span className="kind">{d.kind}</span>
         <span className="grow ellipsis" title={d.path}>{name}</span>
@@ -171,7 +186,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty }:
         {d.public && <span className="chip">public</span>}
         <span className="tiny muted dt-num">{fmtBytes(d.size)}</span>
         <span className="tiny muted dt-num hide-sm">{ago(d.updatedAt)}</span>
-      </Link>
+      </a>
     )
   }
 

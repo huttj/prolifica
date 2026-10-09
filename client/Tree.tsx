@@ -87,21 +87,11 @@ export function TreeView({ roots, current, maxHeight }: { roots: TreeNode[]; cur
   )
 }
 
-export function Legend({ data }: { data?: boolean }) {
-  return (
-    <div className="legend">
-      <span><i style={{ background: '#6f8fe0' }} />new data (same page)</span>
-      <span><i style={{ background: '#d36aa6' }} />new look (same data)</span>
-      <span><i style={{ background: '#d9a03a' }} />remixed</span>
-      {data && <span><i style={{ background: 'var(--accent-2)' }} />derived data</span>}
-    </div>
-  )
-}
-
 /**
- * The same family as a thread: one row per isle or dataset, remixes indented under what they came from.
- * Reads top to bottom in a narrow panel, however deep or wide the family gets. The dot's colour says how
- * each one came from its parent; the current one is highlighted and scrolled into view.
+ * A family as a thread: one row per isle or dataset, remixes indented under what they came from, with
+ * an elbow from each parent's dot to its children's. Reads top to bottom in a narrow panel, however deep
+ * or wide the family gets. Each row says how it came from its parent; the current one is highlighted
+ * and scrolled into view.
  */
 export function ThreadView({ roots, current }: { roots: TreeNode[]; current?: string }) {
   const here = useRef<HTMLAnchorElement>(null)
@@ -131,31 +121,32 @@ function ThreadNode({ node, current, depth, here }: { node: TreeNode; current?: 
   const isCurrent = node.id === current
   const kids = node.children
   const total = (n: TreeNode): number => n.children.reduce((t, c) => t + 1 + total(c), 0)
+  const how = depth > 0 && node.relation && node.relation !== 'binds' ? RELATION_SHORT[node.relation] : null
   return (
-    <li>
+    <li className={kids.length && open ? 'has-kids' : ''}>
       <div className="t-line">
-        {kids.length > 0 ? (
-          <button className={`t-fold ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)} aria-label={open ? 'Fold' : 'Unfold'} aria-expanded={open}>
-            ▸
-          </button>
-        ) : (
-          <span className="t-fold" />
-        )}
         <Link
           to={node.kind === 'isle' ? `/i/${node.id}` : `/d/${node.id}`}
           className={`t-row ${isCurrent ? 'current' : ''}`}
-          title={node.relation && node.relation !== 'binds' ? RELATION_TEXT[node.relation] : undefined}
+          title={`${node.title} · ${who(node.owner)}${node.relation && node.relation !== 'binds' ? ` · ${RELATION_TEXT[node.relation]}` : ''}`}
           ref={isCurrent ? here : undefined}
         >
-          <i className={`t-dot ${node.relation ?? ''} ${node.kind}`} />
-          <span className="t-title ellipsis">
-            {node.kind === 'dataset' ? '▤ ' : ''}
-            {node.title}
+          <i className={`t-dot ${depth > 0 ? (node.relation ?? '') : 'root'} ${node.kind}`} />
+          <span className="t-text">
+            <span className="t-title ellipsis">{node.title}</span>
+            <span className="t-meta">
+              {how && <span className={`t-how ${node.relation}`}>{how}</span>}
+              <span>{who(node.owner)}</span>
+              {node.starCount ? <span>★ {node.starCount}</span> : null}
+              {isCurrent && <span className="t-here">you're here</span>}
+            </span>
           </span>
-          <span className="t-by">{who(node.owner)}</span>
-          {node.starCount ? <span className="t-by">★ {node.starCount}</span> : null}
-          {!open && kids.length > 0 && <span className="t-count">{total(node)}</span>}
         </Link>
+        {kids.length > 0 && (
+          <button className={`t-fold ${open ? 'open' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title={open ? 'Fold' : 'Unfold'}>
+            {open ? '▾' : '▸'} {total(node)}
+          </button>
+        )}
       </div>
       {open && kids.length > 0 && (
         <ul className="thread">
@@ -163,7 +154,7 @@ function ThreadNode({ node, current, depth, here }: { node: TreeNode; current?: 
             <ThreadNode key={`${c.kind}-${c.id}`} node={c} current={current} depth={depth + 1} here={here} />
           ))}
           {kids.length > limit && (
-            <li>
+            <li className="t-more-li">
               <button className="link-btn tiny t-more" onClick={() => setLimit((l) => l + SHOW * 4)}>
                 Show {Math.min(SHOW * 4, kids.length - limit)} more of {kids.length - limit}
               </button>
@@ -175,4 +166,5 @@ function ThreadNode({ node, current, depth, here }: { node: TreeNode; current?: 
   )
 }
 
+const RELATION_SHORT: Record<string, string> = { rebind: 'new data', restyle: 'new look', remix: 'remixed', derived: 'derived' }
 const RELATION_TEXT: Record<string, string> = { rebind: 'New data, same page', restyle: 'New look, same data', remix: 'Remixed', derived: 'Derived data' }

@@ -80,7 +80,7 @@ export function isIslesHost(request: Request, env: Env) {
 
 export function toMe(env: Env, u: UserRow, usage: number): Me {
   const q = quotaFor(env, u)
-  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null }
+  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, connected: !!u.mcp_seen_at }
 }
 
 /** Bytes a person may keep. Admins (the site's own people) get more. */

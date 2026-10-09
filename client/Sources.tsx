@@ -61,7 +61,7 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
         {s.collectedAt && <span className="tiny muted">{ago(s.collectedAt)}</span>}
       </div>
       <div className="tiny muted" style={{ marginTop: 2 }}>
-        feeds {g.slots.map((x, i) => <span key={x}>{i ? ', ' : ''}<code>{x}</code></span>)} · collected by {owners.map((o, i) => <span key={o.id}>{i ? ', ' : ''}{who(o)}</span>)} ·{' '}
+        collected by {owners.map((o, i) => <span key={o.id}>{i ? ', ' : ''}{who(o)}</span>)} ·{' '}
         {g.datasets.length === 1 ? (
           <Link to={`/d/${s.dataset.id}`}>the original data</Link>
         ) : (

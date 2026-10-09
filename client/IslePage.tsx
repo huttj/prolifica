@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Anchor, Dataset, Isle, IsleVersion, Mark, TreeNode, Visibility } from '../shared/types'
+import type { Anchor, Isle, IsleVersion, Mark, TreeNode, Visibility } from '../shared/types'
 import { ago, api, type Layer, type Marks, who } from './api'
 import { navigate } from './navigate'
-import { AskAiButton, AskPopover, changesPrompt, type ChangeNote, useChangeNotes } from './ask'
-import { Legend, ThreadView } from './Tree'
+import { AskAiButton, AskPopover, changesPrompt, type ChangeNote, useAskTopic, useChangeNotes } from './ask'
+import { DataModal } from './DataPages'
+import { FoldedMarkdown } from './Markdown'
+import { ThreadView } from './Tree'
 import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
 import { DataSources } from './Sources'
@@ -72,6 +74,18 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   }, [isle.data, viewing])
   useEffect(() => setReady(false), [frameSrc])
   useEffect(() => setViewing(null), [id])
+
+  useAskTopic(
+    isle.data
+      ? {
+          about: 'this isle',
+          context: `Using the Prolifica connector (${location.origin}/mcp), read isle ${isle.data.id} ("${isle.data.title}", ${location.origin}/i/${isle.data.id}) with get_isle.${
+            me?.id === isle.data.owner.id ? ' It is mine: update it in place (publish_isle with its id and a short note) if I ask for changes.' : " It isn't mine: if I ask for changes, make my own version with publish_isle and parent."
+          }`,
+          suggestions: me?.id === isle.data.owner.id ? ['Explain how this page works', 'Make it work well on phones', 'Tighten up the description'] : ['Explain how this page works', 'Make my own version with my data', 'What could be better here?'],
+        }
+      : null,
+  )
 
   // the author wants to hear everything said about their isle; everyone else starts in the quieter layer
   const ownerId = isle.data?.owner.id
@@ -231,10 +245,17 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
             )}
           </div>
         </div>
+        <a className="btn ghost" href={frameSrc || i.frameUrl} target="_blank" rel="noreferrer" title="Open the page alone, in a new tab">
+          <Icon name="open" /> <span className="hide-sm">Open alone</span>
+        </a>
         {mine && (
-          <button className={`btn ${i.visibility === 'private' ? 'primary' : ''}`} onClick={() => setSettingsOpen(true)} title="Title, description and who can see it">
-            <Icon name={i.visibility === 'private' ? 'lock' : 'open'} />
-            {i.visibility === 'private' ? 'Publish' : `${VISIBILITY_LABEL[i.visibility]} · Edit`}
+          <button
+            className={`btn ${i.visibility === 'private' ? 'primary' : ''}`}
+            onClick={() => setSettingsOpen(true)}
+            title={`How it shows on the map: title, short title, kind of page, description, and who can see it (now ${VISIBILITY_LABEL[i.visibility].toLowerCase()})`}
+          >
+            <Icon name={i.visibility === 'private' ? 'lock' : 'map'} />
+            {i.visibility === 'private' ? 'Publish to the map' : 'Map settings'}
           </button>
         )}
         <button className={`btn ${page?.starredByMe ? 'on' : ''}`} onClick={starPage} title="Star this isle">
@@ -524,7 +545,6 @@ function Changes(props: {
           </div>
         </>
       )}
-      <p className="tiny muted" style={{ margin: '8px 0 0' }}>Needs Prolifica connected to your AI (<Link to="/connect">how</Link>).</p>
     </div>
   )
 }
@@ -749,32 +769,22 @@ function Family({ isle }: { isle: Isle }) {
   const lineage = useAsync(() => api.isleLineage(isle.id), [isle.id, isle.version])
   if (lineage.error) return <ErrorBox error={lineage.error} />
   if (!lineage.data) return <p className="muted small">Loading…</p>
-  const { ancestors, tree, related } = lineage.data
+  const { ancestors, tree } = lineage.data
+  const remixes = (n: TreeNode): number => n.children.reduce((t, c) => t + 1 + remixes(c), 0)
+  const below = remixes(tree)
   return (
     <div className="stack">
-      <div>
-        <div className="row">
-          <div className="small muted grow" style={{ fontWeight: 600 }}>Where it came from, and what grew from it</div>
-          {isle.visibility === 'public' && <Link to={`/tree?isle=${isle.id}`} className="tiny">Show on the map</Link>}
-        </div>
-        <Link to={`/i/${isle.id}/family`} className="btn sm" title="Every remix and version as a graph: what changed at each step, what converged, and a side-by-side compare">
-          <Icon name="open" /> See how it evolved
-        </Link>
-        <Legend />
-        <ThreadView roots={chain(ancestors, tree)} current={isle.id} />
+      <div className="row" style={{ gap: 6 }}>
+        <span className="small muted grow">
+          {ancestors.length ? `Made from ${ancestors.length === 1 ? 'one isle' : `a line of ${ancestors.length}`}` : 'An original'}
+          {below ? ` · ${below} remix${below === 1 ? '' : 'es'} grew from it` : ' · no remixes yet'}
+        </span>
+        {isle.visibility === 'public' && <Link to={`/tree?isle=${isle.id}`} className="btn ghost sm" title="Where it sits on the map"><Icon name="map" /> Map</Link>}
       </div>
-      {related.length > 0 && (
-        <div>
-          <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Data it shows</div>
-          {related.map((d) => (
-            <Link key={d.id} to={`/d/${d.id}`} className="piece" >
-              <span className="kind">data</span>
-              <span className="grow ellipsis small">{d.title}</span>
-              <span className="tiny muted">{who(d.owner)}</span>
-            </Link>
-          ))}
-        </div>
-      )}
+      <Link to={`/i/${isle.id}/family`} className="btn sm self-start" title="Every remix and version as a graph: what changed at each step, which features each one has, and a side-by-side compare">
+        <Icon name="tree" /> See how it evolved
+      </Link>
+      <ThreadView roots={chain(ancestors, tree)} current={isle.id} />
       {isle.uses.length > 0 && (
         <div>
           <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Borrows from</div>
@@ -791,30 +801,28 @@ function Family({ isle }: { isle: Isle }) {
 }
 
 function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
-  const { me, toast } = useSession()
-  const myData = useAsync(() => (me ? api.data() : Promise.resolve([] as Dataset[])), [me?.id])
-  const [choice, setChoice] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState(false)
-  const slots = Object.keys({ ...isle.slots, ...isle.bindings })
-
-  const rebind = async () => {
-    setBusy(true)
-    try {
-      const bindings = Object.fromEntries(slots.map((s) => [s, choice[s] || isle.bindings[s]?.id || '']).filter(([, v]) => v))
-      const child = await api.rebind(isle.id, bindings)
-      toast('Your version is up')
-      navigate(`/i/${child.id}`)
-    } catch (e) {
-      toast((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
+  const [shown, setShown] = useState<string | null>(null)
+  // each dataset once, however many slots read it
+  const data = [...new Map(Object.values(isle.bindings).filter((d): d is NonNullable<typeof d> => !!d).map((d) => [d.id, d])).values()]
   return (
     <div className="stack">
-      {isle.description && <p style={{ margin: 0 }}>{isle.description}</p>}
-      {slots.length > 0 && (
+      {isle.description && (
+        <div className="isle-desc">
+          <FoldedMarkdown text={isle.description} lines={6} />
+        </div>
+      )}
+      <div>
+        <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Data it shows</div>
+        {data.length === 0 && <p className="small muted" style={{ margin: 0 }}>This isle reads no data.</p>}
+        {data.map((d) => (
+          <button key={d.id} className="piece data-piece" onClick={() => setShown(d.id)} title="Look at it">
+            <span className="kind">{d.kind}</span>
+            <span className="grow ellipsis small" style={{ textAlign: 'left' }}>{d.path}</span>
+            <span className="tiny muted">{who(d.owner)}</span>
+          </button>
+        ))}
+      </div>
+      {data.length > 0 && (
         <div className="piece" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
           <b className="small">See it with your data</b>
           <span className="tiny muted">Pick or drop your data (any shape) or say what to fetch; your AI fits it to this isle, publishes your version and tests it.</span>
@@ -822,47 +830,10 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
         </div>
       )}
       <DataSources isle={isle} />
-      <div>
-        <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Slots</div>
-        {slots.length === 0 && <p className="small muted">This isle reads no data.</p>}
-        {slots.map((s) => {
-          const d = isle.bindings[s]
-          const spec = isle.slots[s]
-          return (
-            <div key={s} className="piece" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-              <div className="row">
-                <code style={{ fontWeight: 700 }}>{s}</code>
-                {spec?.kind && <span className="kind">{spec.kind}</span>}
-                <span className="grow" />
-                {d ? <Link to={`/d/${d.id}`} className="small ellipsis">{d.path}</Link> : <span className="small err">unbound</span>}
-              </div>
-              {spec?.description && <div className="tiny muted">{spec.description}</div>}
-              {me && (myData.data?.length ?? 0) > 0 && (
-                <select className="field" style={{ marginTop: 6 }} value={choice[s] ?? ''} onChange={(e) => setChoice((c) => ({ ...c, [s]: e.target.value }))}>
-                  <option value="">Keep {d ? d.path : '(none)'}</option>
-                  {myData.data!
-                    .filter((x) => !spec?.kind || spec.kind === 'any' || x.kind === spec.kind)
-                    .map((x) => (
-                      <option key={x.id} value={x.id}>{x.path}</option>
-                    ))}
-                </select>
-              )}
-            </div>
-          )
-        })}
-        {me && slots.length > 0 && (
-          <div className="row" style={{ marginTop: 6 }}>
-            <button className="btn primary sm" disabled={busy || !Object.values(choice).some(Boolean)} onClick={rebind}>
-              <Icon name="remix" /> Bind these as they are
-            </button>
-            <span className="tiny muted">Only when your data already fits each slot exactly.</span>
-          </div>
-        )}
-      </div>
       <div className="row">
-        <a className="btn sm" href={`/api/isles/${isle.id}/source`} target="_blank" rel="noreferrer"><Icon name="open" /> Source</a>
-        <a className="btn sm" href={isle.frameUrl} target="_blank" rel="noreferrer"><Icon name="open" /> Open alone</a>
+        <a className="btn sm" href={`/api/isles/${isle.id}/source`} target="_blank" rel="noreferrer"><Icon name="code" /> Page source</a>
       </div>
+      {shown && <DataModal id={shown} onClose={() => setShown(null)} />}
     </div>
   )
 }
@@ -889,13 +860,14 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
     }
   }
   const options: { v: Visibility; label: string; hint: string }[] = [
-    { v: 'public', label: 'Public', hint: 'Listed on Explore. Anyone can see and remix it.' },
-    { v: 'unlisted', label: 'Unlisted', hint: 'Anyone with the link can see and remix it; not listed.' },
+    { v: 'public', label: 'Public', hint: 'On the map and Explore. Anyone can see and remix it.' },
+    { v: 'unlisted', label: 'Unlisted', hint: 'Anyone with the link can see and remix it; not on the map.' },
     { v: 'private', label: 'Private', hint: 'Only you.' },
   ]
   return (
     <Modal onClose={onClose}>
-      <h2>Publish</h2>
+      <h2>{isle.visibility === 'private' ? 'Publish to the map' : 'Map settings'}</h2>
+      <p className="small muted" style={{ margin: '0 0 4px' }}>How this isle shows on the map and in Explore.</p>
       <label className="lbl">Who can see it</label>
       <div className="stack" style={{ gap: 6 }}>
         {options.map((o) => (
@@ -923,8 +895,8 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
           <input className="field" value={viewName} maxLength={40} placeholder="e.g. Discourse map" onChange={(e) => setViewName(e.target.value)} />
         </div>
       </div>
-      <label className="lbl">Description</label>
-      <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
+      <label className="lbl">Description <span className="muted">(two to four short sentences; blank lines make paragraphs)</span></label>
+      <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} rows={5} />
       <div className="row" style={{ marginTop: 14 }}>
         <button
           className="btn sm danger"
@@ -984,7 +956,6 @@ function RemixPopover({ isle, onClose, onUseData, onAskChanges }: { isle: Isle; 
         <button className="btn ghost sm" onClick={onUseData}><Icon name="data" /> Same look, my data</button>
         {onAskChanges && <button className="btn ghost sm" onClick={onAskChanges}><Icon name="pick" /> Point at pieces</button>}
       </div>
-      <p className="tiny muted" style={{ margin: '6px 0 0' }}>Not connected yet? <Link to="/connect">Connect your AI</Link>.</p>
     </AskPopover>
   )
 }

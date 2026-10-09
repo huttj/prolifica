@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Anchor, Isle } from '../shared/types'
+import { ConnectSteps } from './Settings'
+import { Link, Modal, useSession } from './ui'
 
 /**
  * Handing work to the person's own AI (the Causal Tools pattern): claude.ai and chatgpt.com can't be
- * framed, so the AI opens in a popup beside the app with the prompt already typed. The MCP connector
- * does the rest. Which AI is remembered per browser.
+ * framed (they refuse to load in an iframe), so the AI opens in a popup beside the app with the prompt
+ * already typed. The MCP connector does the rest. Which AI is remembered per browser. Until the
+ * person's AI has reached Prolifica once, handing off first shows how to connect it.
  */
 
 export type AiId = 'claude' | 'chatgpt'
@@ -57,9 +60,59 @@ export function AiMark({ ai, size = 13 }: { ai: AiId; size?: number }) {
   )
 }
 
+const SKIP_CONNECT_KEY = 'pf:connectedSaid'
+const saidConnected = () => {
+  try {
+    return localStorage.getItem(SKIP_CONNECT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Shown instead of the hand-off while Prolifica hasn't been connected to the person's AI. */
+function ConnectFirst({ ai, onGo, onClose }: { ai: AiId; onGo: () => void; onClose: () => void }) {
+  const { me } = useSession()
+  return (
+    <Modal onClose={onClose} wide>
+      <h2>Connect Prolifica to {AI_LABEL[ai]} first</h2>
+      <p className="small muted" style={{ marginTop: 4 }}>
+        Your AI does this through the Prolifica connector, and it doesn't look connected yet. Add it once (a minute), then come back and ask again.
+        {!me && <> You'll also need an account: <Link to={`/login?next=${encodeURIComponent(location.pathname)}`}>sign in</Link>.</>}
+      </p>
+      <ConnectSteps />
+      <div className="row" style={{ marginTop: 14 }}>
+        <button
+          className="btn ghost sm"
+          onClick={() => {
+            try {
+              localStorage.setItem(SKIP_CONNECT_KEY, '1')
+            } catch {
+              /* storage unavailable */
+            }
+            onGo()
+          }}
+        >
+          It's connected already
+        </button>
+        <span className="grow" />
+        <button className="btn" onClick={onClose}>Not now</button>
+        <button className="btn primary" onClick={onGo}>
+          <span className="ask-mark"><AiMark ai={ai} /></span> Open {AI_LABEL[ai]} anyway
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 /** "Ask Claude" with a caret to switch AI. */
 export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt: string; disabled?: boolean; onAsk?: () => void; label?: string }) {
   const [ai, choose] = useLastAi()
+  const { me } = useSession()
+  const [gate, setGate] = useState(false)
+  const go = () => {
+    popupAI(aiUrl(ai, prompt))
+    onAsk?.()
+  }
   const [menu, setMenu] = useState<{ right: number; top: number; up: boolean } | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -82,8 +135,8 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
         onClick={(e) => {
           e.preventDefault()
           if (disabled) return
-          popupAI(aiUrl(ai, prompt))
-          onAsk?.()
+          if (!me?.connected && !saidConnected()) return setGate(true)
+          go()
         }}
       >
         <span className="ask-mark"><AiMark ai={ai} /></span>
@@ -115,6 +168,18 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
               <AiMark ai={other} /> {label} {AI_LABEL[other]} instead
             </button>
           </div>,
+          document.body,
+        )}
+      {gate &&
+        createPortal(
+          <ConnectFirst
+            ai={ai}
+            onClose={() => setGate(false)}
+            onGo={() => {
+              setGate(false)
+              go()
+            }}
+          />,
           document.body,
         )}
     </div>
@@ -182,14 +247,18 @@ export function AskPopover(props: {
   prompt: (want: string) => string
   onClose: () => void
   children?: ReactNode
+  /** the AI can be asked without anything typed */
+  optional?: boolean
+  /** ready-made asks, one click to fill the box */
+  suggestions?: string[]
 }) {
-  const { title, blurb, placeholder, label, prompt, onClose, children } = props
+  const { title, blurb, placeholder, label, prompt, onClose, children, optional, suggestions } = props
   const [want, setWant] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const away = (e: PointerEvent) => {
       const t = e.target as Element
-      if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor')) onClose()
+      if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor, .scrim')) onClose()
     }
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('pointerdown', away)
@@ -203,9 +272,16 @@ export function AskPopover(props: {
     <div className="popover card" ref={ref} role="dialog">
       <b>{title}</b>
       {blurb && <p className="tiny muted" style={{ margin: '2px 0 8px' }}>{blurb}</p>}
+      {suggestions && suggestions.length > 0 && (
+        <div className="ask-suggest">
+          {suggestions.map((x) => (
+            <button key={x} className={want === x ? 'on' : ''} onClick={() => setWant(x)}>{x}</button>
+          ))}
+        </div>
+      )}
       <textarea autoFocus className="field" rows={3} placeholder={placeholder} value={want} onChange={(e) => setWant(e.target.value)} />
       <div className="row" style={{ marginTop: 8 }}>
-        <AskAiButton label={label} prompt={prompt(want.trim())} disabled={!want.trim()} onAsk={onClose} />
+        <AskAiButton label={label} prompt={prompt(want.trim())} disabled={!optional && !want.trim()} onAsk={onClose} />
       </div>
       {children}
     </div>
@@ -213,13 +289,13 @@ export function AskPopover(props: {
 }
 
 /** A button that opens an AskPopover under it. */
-export function AskPopoverButton(props: Omit<Parameters<typeof AskPopover>[0], 'onClose'> & { button: ReactNode; align?: 'left' | 'right' }) {
-  const { button, align = 'right', ...rest } = props
+export function AskPopoverButton(props: Omit<Parameters<typeof AskPopover>[0], 'onClose'> & { button: ReactNode; align?: 'left' | 'right'; className?: string }) {
+  const { button, align = 'right', className = 'btn primary', ...rest } = props
   const [open, setOpen] = useState(false)
   const [ai] = useLastAi()
   return (
     <span className="pop-anchor">
-      <button className={`btn primary ${open ? 'on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className={`${className} ${open ? 'on' : ''}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="ask-mark"><AiMark ai={ai} /></span>
         {button}
       </button>
@@ -231,3 +307,52 @@ export function AskPopoverButton(props: Omit<Parameters<typeof AskPopover>[0], '
     </span>
   )
 }
+
+// ---- asking about whatever page you're on ----
+
+/** What the header's Ask button knows about the page you're on. */
+export interface AskTopic {
+  /** "this isle", "your data" */
+  about: string
+  /** what the AI should read first, as the prompt's opening */
+  context: string
+  suggestions?: string[]
+}
+
+type TopicSlot = { topic: AskTopic | null; set: (t: AskTopic | null) => void }
+export const AskTopicContext = createContext<TopicSlot>({ topic: null, set: () => {} })
+
+/** A page says what it's about while it's shown; the header's Ask button builds on it. */
+export function useAskTopic(topic: AskTopic | null) {
+  const { set } = useContext(AskTopicContext)
+  const key = topic ? JSON.stringify(topic) : ''
+  useEffect(() => {
+    set(topic)
+    return () => set(null)
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** The header's Ask: one steady way to hand anything on the site to your AI. */
+export function HeaderAsk() {
+  const { topic } = useContext(AskTopicContext)
+  const general = `Using the Prolifica connector (${location.origin}/mcp), act for me on Prolifica: my data, my isles and the public archipelago. Read the guide tool first if you haven't.`
+  return (
+    <AskPopoverButton
+      className="btn sm header-ask"
+      align="right"
+      button={<span className="hide-sm">Ask</span>}
+      title={topic ? `Ask your AI about ${topic.about}` : 'Ask your AI'}
+      blurb="It opens beside this page with your ask typed in, and works through the Prolifica connector."
+      placeholder={topic ? `What do you want to know or change about ${topic.about}?` : 'e.g. make an isle from my running log, or find isles about city budgets'}
+      label="Ask"
+      suggestions={topic?.suggestions}
+      prompt={(want) => `${topic?.context ?? general}\n\n${want}`}
+    />
+  )
+}
+
+export function AskTopicProvider({ children }: { children: ReactNode }) {
+  const [topic, set] = useState<AskTopic | null>(null)
+  return <AskTopicContext.Provider value={{ topic, set }}>{children}</AskTopicContext.Provider>
+}
+

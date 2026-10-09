@@ -2,6 +2,7 @@ import { Component, useCallback, useEffect, useMemo, useRef, useState, type Reac
 import type { Me } from '../shared/types'
 import { api, ApiError } from './api'
 import { Archipelago } from './Archipelago'
+import { AskTopicProvider, HeaderAsk } from './ask'
 import { DataPage, MyData } from './DataPages'
 import { Home } from './Home'
 import { IslePage } from './IslePage'
@@ -28,7 +29,7 @@ class PageBoundary extends Component<{ path: string; children: ReactNode }, { er
       <div className="wrap page-head">
         <h1>This page broke</h1>
         <p className="muted">{this.state.error.message}</p>
-        <p><a href="/">Back to the archipelago</a></p>
+        <p><a href="/">Back to Explore</a></p>
       </div>
     )
   }
@@ -88,18 +89,19 @@ export function App() {
 
   return (
     <SessionContext.Provider value={session}>
+      <AskTopicProvider>
       <header className="nav">
         <div className="wrap">
           <Link to="/" className="brand">
             <Logo /> <span>Prolifica</span>
           </Link>
           {nav('/', 'Explore')}
-          {nav('/tree', 'Archipelago', 'hide-sm')}
+          {nav('/tree', 'Map')}
           {nav('/sites', 'Sites', 'hide-sm')}
           {me && nav('/library', 'Library')}
           {me && nav('/data', 'My data', 'hide-sm')}
           <div className="spacer" />
-          {nav('/connect', 'Connect', 'hide-sm')}
+          <HeaderAsk />
           {me ? (
             <>
               {me.handle && nav(`/@${me.handle}`, `@${me.handle}`, 'hide-sm')}
@@ -117,6 +119,7 @@ export function App() {
       {me && !me.handle && path !== '/settings' && <HandlePrompt />}
       <PageBoundary path={path}>{page}</PageBoundary>
       {toastMsg && <div className="toast">{toastMsg}</div>}
+      </AskTopicProvider>
     </SessionContext.Provider>
   )
 }

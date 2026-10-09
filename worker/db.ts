@@ -10,6 +10,8 @@ export interface UserRow {
   bio: string | null
   created_at: number
   last_login_at: number | null
+  /** last time their AI reached /mcp */
+  mcp_seen_at?: number | null
 }
 
 export function toPerson(u: Pick<UserRow, 'id' | 'handle' | 'name' | 'bio'>): Person {
@@ -52,6 +54,10 @@ export class Db {
   constructor(private d1: D1Database) {}
 
   // ---- users ----
+
+  markMcpSeen(id: string) {
+    return this.d1.prepare('UPDATE users SET mcp_seen_at = ? WHERE id = ?').bind(Date.now(), id).run()
+  }
 
   userById(id: string) {
     return this.d1.prepare('SELECT * FROM users WHERE id = ?').bind(id).first<UserRow>()

@@ -86,6 +86,10 @@ const ICONS: Record<string, string> = {
   edit: 'M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4',
   code: 'M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16',
   fit: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5',
+  map: 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14',
+  expand: 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7',
+  sparkle: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
+  folders: 'M3 7.5A1.5 1.5 0 014.5 6H9l2 2h8.5A1.5 1.5 0 0121 9.5v8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5zM8 13h8M12 11l-2 2 2 2',
 }
 
 export function Icon({ name, filled, className }: { name: keyof typeof ICONS | string; filled?: boolean; className?: string }) {
