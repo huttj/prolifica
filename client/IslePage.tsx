@@ -10,10 +10,10 @@ import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
 import { DataSources } from './Sources'
 import {
-  EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, SizedFrame, useAsync, useSession,
+  EmojiPicker, ErrorBox, Icon, Link, PersonLink, SizedFrame, useAsync, useSession,
 } from './ui'
 
-type Tab = 'notes' | 'family' | 'data' | 'history'
+type Tab = 'notes' | 'family' | 'data' | 'history' | 'settings'
 type Picked = { anchor: Anchor; snippet: string | null }
 
 const LAYERS: { id: Layer; label: string }[] = [
@@ -42,7 +42,6 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   const [focusedComment, setFocusedComment] = useState<string | null>(null)
   const [remixOpen, setRemixOpen] = useState(false)
   const [useDataOpen, setUseDataOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   // the side panel's width, dragged by its edge and remembered per browser
   const [panelW, setPanelW] = useState(readPanelWidth)
   const startResize = (e: React.PointerEvent) => {
@@ -236,23 +235,15 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
               {' · '}
               <button className="link-btn" onClick={() => setTab('history')} title="Version history">v{i.version}</button>
               {i.parent && <> · from <Link to={`/i/${i.parent.id}`}>{i.parent.title}</Link></>}
-              {i.visibility !== 'public' && <span className="isle-lock" title={VISIBILITY_LABEL[i.visibility]}><Icon name="lock" /></span>}
+              {i.visibility !== 'public' && (
+                <button className="link-btn isle-lock" title={VISIBILITY_LABEL[i.visibility]} onClick={() => mine && setTab('settings')} disabled={!mine}><Icon name="lock" /></button>
+              )}
             </span>
           </div>
         </div>
         <a className="btn ghost icon-btn" href={frameSrc || i.frameUrl} target="_blank" rel="noreferrer" title="Open alone, in a new tab" aria-label="Open alone">
           <Icon name="open" />
         </a>
-        {mine && (
-          <button
-            className="btn ghost icon-btn"
-            onClick={() => setSettingsOpen(true)}
-            title={`Map settings: title, short title, kind of page, description, and who can see it (now ${VISIBILITY_LABEL[i.visibility].toLowerCase()})`}
-            aria-label="Map settings"
-          >
-            <Icon name="gear" />
-          </button>
-        )}
         <button className={`btn ${page?.starredByMe ? 'on' : ''}`} onClick={starPage} title="Star this isle">
           <span style={{ color: 'var(--star)', display: 'inline-flex' }}><Icon name="star" filled={!!page?.starredByMe} /></span>
           {page?.stars || i.starCount || ''}
@@ -337,6 +328,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
               <button className={tab === 'family' ? 'on' : ''} onClick={() => setTab('family')}>Family</button>
               <button className={tab === 'data' ? 'on' : ''} onClick={() => setTab('data')}>Data</button>
               <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History</button>
+              {mine && <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}>Settings</button>}
               <div className="grow" />
               <button onClick={() => setTab(null)} title="Close"><Icon name="close" /></button>
             </div>
@@ -360,11 +352,11 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
               {tab === 'family' && <Family isle={i} />}
               {tab === 'data' && <DataTab isle={i} onUseData={() => setUseDataOpen(true)} />}
               {tab === 'history' && <History isle={i} viewing={viewing} setViewing={setViewing} />}
+              {tab === 'settings' && mine && <IsleSettings key={i.id} isle={i} onChanged={isle.reload} />}
             </div>
           </aside>
         )}
       </div>
-      {settingsOpen && <IsleSettings isle={i} onClose={() => setSettingsOpen(false)} onChanged={isle.reload} />}
       {useDataOpen && <UseMyDataModal isle={i} onClose={() => setUseDataOpen(false)} />}
       {family && <EvolutionModal id={i.id} onClose={() => navigate(`/i/${i.id}`, { replace: true })} />}
     </div>
@@ -703,7 +695,8 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
   )
 }
 
-function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () => void; onChanged: () => void }) {
+/** The owner's settings for an isle, in the side panel: who sees it, its names on the map, its description. */
+function IsleSettings({ isle, onChanged }: { isle: Isle; onChanged: () => void }) {
   const { toast } = useSession()
   const [title, setTitle] = useState(isle.title)
   const [shortTitle, setShortTitle] = useState(isle.shortTitle ?? '')
@@ -717,7 +710,6 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
       await api.updateIsle(isle.id, { title, description, visibility, shortTitle: shortTitle.trim() || null, viewName: viewName.trim() || null })
       toast(visibility === isle.visibility ? 'Saved' : `Now ${VISIBILITY_LABEL[visibility].toLowerCase()}`)
       onChanged()
-      onClose()
     } catch (e) {
       toast((e as Error).message)
     } finally {
@@ -730,9 +722,8 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
     { v: 'private', label: 'Private', hint: 'Only you.' },
   ]
   return (
-    <Modal onClose={onClose}>
-      <h2>{isle.visibility === 'private' ? 'Publish to the map' : 'Map settings'}</h2>
-      <label className="lbl">Who can see it</label>
+    <div className="isle-settings">
+      <label className="lbl" style={{ marginTop: 0 }}>Who can see it</label>
       <div className="stack" style={{ gap: 6 }}>
         {options.map((o) => (
           <label key={o.v} className={`choice ${visibility === o.v ? 'on' : ''}`}>
@@ -749,18 +740,12 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
       )}
       <label className="lbl">Title</label>
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
-        <div className="grow" style={{ minWidth: 160 }}>
-          <label className="lbl">Short title <span className="muted">(for the map)</span></label>
-          <input className="field" value={shortTitle} maxLength={40} placeholder="e.g. Matchmaker rejection" onChange={(e) => setShortTitle(e.target.value)} />
-        </div>
-        <div className="grow" style={{ minWidth: 160 }}>
-          <label className="lbl">Kind of page <span className="muted">(its group)</span></label>
-          <input className="field" value={viewName} maxLength={40} placeholder="e.g. Discourse map" onChange={(e) => setViewName(e.target.value)} />
-        </div>
-      </div>
-      <label className="lbl">Description <span className="muted">(two to four short sentences; blank lines make paragraphs)</span></label>
-      <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} rows={5} />
+      <label className="lbl">Short title on the map</label>
+      <input className="field" value={shortTitle} maxLength={40} placeholder="e.g. Matchmaker rejection" onChange={(e) => setShortTitle(e.target.value)} />
+      <label className="lbl">Kind of page</label>
+      <input className="field" value={viewName} maxLength={40} placeholder="e.g. Discourse map" onChange={(e) => setViewName(e.target.value)} />
+      <label className="lbl">Description</label>
+      <textarea className="field" value={description} onChange={(e) => setDescription(e.target.value)} rows={6} />
       <div className="row" style={{ marginTop: 14 }}>
         <button
           className="btn sm danger"
@@ -774,10 +759,9 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
           <Icon name="trash" /> Delete isle
         </button>
         <span className="grow" />
-        <button className="btn" onClick={onClose}>Cancel</button>
         <button className="btn primary" disabled={busy} onClick={save}>Save</button>
       </div>
-    </Modal>
+    </div>
   )
 }
 

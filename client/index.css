@@ -183,7 +183,9 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .isle-meta a { color: var(--ink-2); text-decoration: none; font-weight: 600; }
 .isle-meta a:hover, .isle-meta .link-btn:hover { text-decoration: underline; }
 .isle-meta .link-btn { color: inherit; font: inherit; }
-.isle-lock { margin-left: 6px; display: inline-flex; vertical-align: -2px; }
+.isle-lock { margin-left: 6px; color: inherit; cursor: pointer; }
+.isle-lock:disabled { cursor: default; }
+.isle-lock { display: inline-flex; vertical-align: -2px; }
 .isle-lock .icon { width: 13px; height: 13px; }
 .isle-bar .sub { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .isle-bar .sub a { text-decoration: none; font-weight: 600; color: var(--ink-2); }

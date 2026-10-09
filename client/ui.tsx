@@ -123,7 +123,9 @@ export function SizedFrame(props: React.IframeHTMLAttributes<HTMLIFrameElement> 
     go()
     return () => cancelAnimationFrame(raf)
   }, [src, ref])
-  return <iframe ref={ref} {...rest} />
+  // a new src gets a new frame: re-pointing one would add the frame's page to the browser's history,
+  // and Back would then step the frame back instead of leaving the page
+  return <iframe key={src} ref={ref} {...rest} />
 }
 
 /**
