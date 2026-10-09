@@ -921,6 +921,16 @@ export class Store {
     return Promise.all(results.map((r) => this.toSummary(r)))
   }
 
+  /** The viewer's other isles running this exact page (to carry a page fix over to them). */
+  async myIslesOnPage(sourceBlob: string, except: string): Promise<string[]> {
+    const me = this.requireViewer()
+    const { results } = await this.d1
+      .prepare('SELECT id FROM isles WHERE owner_id = ? AND source_blob = ? AND id != ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 50')
+      .bind(me.id, sourceBlob, except)
+      .all<{ id: string }>()
+    return results.map((r) => r.id)
+  }
+
   async publishIsle(input: PublishInput): Promise<{ isle: Isle; madePublic: DatasetRef[] }> {
     const me = this.requireViewer()
     const existing = input.id ? await this.isleRow(input.id) : null

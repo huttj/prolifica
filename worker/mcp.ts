@@ -6,6 +6,7 @@ import { parseCsv, parseCsvRows } from '../shared/csv'
 import { appendAt, derive, getAt, mergeAt, shapeOf, toCsv, type Fields, type Where } from '../shared/jsondata'
 import { runExpression } from '../shared/transform'
 import { Db, type UserRow } from './db'
+import { fetchOut } from './fetchout'
 import { Store, StoreError, fmtBytes, type Layer, type SourceInput } from './store'
 
 /**
@@ -53,6 +54,9 @@ make here is public by default and can be remixed by anyone.
   (what's in and what was left out) and code: the bookmarklet, scraper or script itself, in
   full, so anyone can collect more the same way. If you scraped it, the code you ran is the
   code. Data gathered by identical code is linked up automatically.
+- To look at something on the web (the images in a thread, a page, a JSON file), use fetch_url: it
+  runs on the server, images come back as images, up to 10 at a time. save_as keeps one as data with
+  its source. Your own sandbox may not reach the web; fetch_url does.
 - Before collecting from a website, call site with its URL: it returns the collectors that have
   worked there (with code) and the data already gathered from it. Reuse before you rewrite.
 - Data is private until something public shows it. Publishing a public isle bound to your
@@ -109,12 +113,17 @@ data: it asks for it by slot name, so anyone can run their own data through it.
 - changes: alongside the note, list what changed part by part — [{part: "legend", what: "clicking an
   entry selects its posts"}] — naming parts by their data-pid. Pass parts on draws_from too, so one
   component (a legend, a sidebar) can be followed from isle to isle.
-- Bringing a change to several isles (propagating it)? If they run the same page, update the page
-  once and rebind or point the others at it; otherwise edit each, and give each one draws_from the
-  isle/version the change came from, with the same part names.
+- from copies a page as it is at that moment; the rebind doesn't follow later fixes on its own.
+  When you fix a page that more of your isles run, pass propagate: true on that publish_isle or
+  edit_isle: each of your isles on the old page gets the new one as a version drawing from it (other
+  people's isles are never changed; they see the newer page in get_isle). Otherwise edit each, and give
+  each one draws_from the isle/version the change came from, with the same part names.
 - view: "same" or "new" whenever you pass html with a parent (see above).
-- short_title: one to three words for the map, naming what's particular to this isle ("Kennewick",
-  "Bike assault"): its content.
+- short_title: always give one when you publish (new isle, remix or rebind) or make a remix with
+  edit_isle. One to four words, under about 24 characters, naming what's particular to this isle,
+  its content not its format ("Kennewick", "Bike assault", "Paul Graham pushback"). It is the isle's
+  name on the map; without it the map cuts the title down itself, and siblings that share an opening
+  ("Anatomy of a …") all end up reading alike. Fix a missing one with publish_isle id + short_title.
 - view_name: what kind of page it is ("Discourse map", "City guide"): its format, which names its group
   on the map. Give it when you make a new page; a rebind inherits it.
 - When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
@@ -283,6 +292,21 @@ const TOOLS = [
     ),
   },
   {
+    name: 'fetch_url',
+    description:
+      'Fetch web addresses on the server: look at images (they come back as images), pages and files without them passing through your workspace. Give urls to look at up to 10 at once, or one url with save_as to keep it as data (source recorded).',
+    inputSchema: obj({
+      urls: { type: 'array', items: { type: 'string' }, description: 'Up to 10 http(s) addresses to look at (images, json, text, html)' },
+      url: s('One address (the same as urls with one item; needed with save_as)'),
+      save_as: s('Keep it as data at this path, e.g. "x-threads/pg/media/123.jpg" (counts against storage)'),
+      description: s('With save_as: what it is, in one short sentence'),
+      notes: s('With save_as: anything worth recording about where it came from'),
+      public: { type: 'boolean', description: 'With save_as: make it public now' },
+      limit: { type: 'integer', description: 'Characters of text to return per address (default 20000)' },
+    }),
+    annotations: { readOnlyHint: false, openWorldHint: true },
+  },
+  {
     name: 'update_data',
     description:
       'Rename/move a dataset (to reorganize folders), change its description, transform or provenance (source), or make it public/private, without touching its contents. For many at once (a reorganization), pass items: one call, each item reported on its own.',
@@ -351,9 +375,10 @@ const TOOLS = [
       view: s('"same" if the page is still the same view (adapted to data, small fixes), "new" if it now looks or works differently', { enum: ['same', 'new'] }),
       as_remix: { type: 'boolean', description: 'Publish the edited page as a new isle with this one as its parent, instead of updating it' },
       title: s('With as_remix: the new isle\'s title'),
-      short_title: s('With as_remix: one to three words for the map'),
+      short_title: s('With as_remix, always: one to four words naming what is particular to it, its name on the map'),
       bindings: { type: 'object', description: 'With as_remix: slot -> dataset id for the new isle (default: keep the original\'s)', additionalProperties: { type: 'string' } },
       changes: { type: 'array', description: 'What this version changed, part by part: [{part, what}], part being a component of the page (use its data-pid when it has one, e.g. "legend", "selected-tweet"). Lets people follow one component\'s history across the family.', items: obj({ part: s('The component'), what: s('What changed in it') }, ['part', 'what']) },
+      propagate: { type: 'boolean', description: 'When this changes the page of your own isle: give the same new page to your other isles that ran the old one (each gets a version drawing from this one). Others\' isles are never touched.' },
       draws_from: { type: 'array', description: 'Other isles this version pulls changes from (not its parent): e.g. you brought in a sibling remix\'s new sidebar. [{isle, version (default: its latest), note: what you took}]. Shown as a converging edge in the family graph.', items: obj({ isle: s('Isle id'), version: { type: 'integer' }, note: s('What you took from it'), parts: { type: 'array', items: { type: 'string' }, description: 'Which components you took (data-pid names)' } }, ['isle']) },
     }, ['id', 'edits']),
   },
@@ -416,7 +441,7 @@ const TOOLS = [
       dry_run: { type: 'boolean', description: 'Publish nothing: report each slot with the data that would be bound (its kind and shape next to the slot description), slots the page reads but nothing fills, and which of your private data would become public' },
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
       title: s('Title'),
-      short_title: s('One to three words for the map, naming what is particular to this one ("Kennewick", "Bike assault", "OpenAI firings"): the map already shows what kind of page it is'),
+      short_title: s('Always give one. One to four words (under ~24 characters) naming what is particular to this one ("Kennewick", "Bike assault", "Paul Graham pushback"): its name on the map, which already shows what kind of page it is'),
       view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s; give it for a new page or when a remix makes a different kind of page.'),
       description: s('What it shows, in two to four short sentences (blank lines between paragraphs). The data shape it expects goes in the slot descriptions, not here.'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
@@ -429,6 +454,7 @@ const TOOLS = [
       note: s('What changed, in a sentence or two. For an update: what this version changed. For a new remix: what you changed from the original and why. Shown in the family\'s evolution view, so be specific ("swapped in Kennewick\'s data; city name now read from meta.city").'),
       view: s('With html and a parent: "same" if you only adapted the page to new data or fixed something small, "new" if it now looks or works differently. Decides whether it joins its parent\'s island group.', { enum: ['same', 'new'] }),
       changes: { type: 'array', description: 'What this version changed, part by part: [{part, what}], part being a component of the page (use its data-pid when it has one, e.g. "legend", "selected-tweet"). Lets people follow one component\'s history across the family.', items: obj({ part: s('The component'), what: s('What changed in it') }, ['part', 'what']) },
+      propagate: { type: 'boolean', description: 'When this changes the page of your own isle: give the same new page to your other isles that ran the old one (each gets a version drawing from this one). Others\' isles are never touched.' },
       draws_from: { type: 'array', description: 'Other isles this version pulls changes from (not its parent): e.g. you brought in a sibling remix\'s new sidebar. [{isle, version (default: its latest), note: what you took}]. Shown as a converging edge in the family graph.', items: obj({ isle: s('Isle id'), version: { type: 'integer' }, note: s('What you took from it'), parts: { type: 'array', items: { type: 'string' }, description: 'Which components you took (data-pid names)' } }, ['isle']) },
     }),
   },
@@ -679,6 +705,46 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       return text({ id: d.id, path: d.path, kind: d.kind, size: fmtBytes(d.size), public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left })
     }
 
+    case 'fetch_url': {
+      const urls = [...(Array.isArray(args.urls) ? args.urls.map(String) : []), ...(str(args.url) ? [str(args.url)!] : [])]
+      if (!urls.length) throw new StoreError(400, 'Give url or urls')
+      if (urls.length > 10) throw new StoreError(400, 'At most 10 addresses at a time')
+      const saveAs = str(args.save_as)
+      if (saveAs && urls.length > 1) throw new StoreError(400, 'save_as keeps one address; give one url')
+      const limit = Math.min(100_000, Math.max(1, Number(args.limit) || 20_000))
+      const content: Content[] = []
+      let shown = 0
+      for (const u of urls) {
+        const got = await fetchOut(u, appOrigin(request, env), islesOrigin(request, env))
+        if ('error' in got) {
+          content.push({ type: 'text', text: JSON.stringify({ url: u, error: got.error }) })
+          continue
+        }
+        const { bytes, contentType, finalUrl } = got
+        const info: Record<string, unknown> = { url: u, ...(finalUrl !== u ? { final_url: finalUrl } : {}), content_type: contentType, size: fmtBytes(bytes.length) }
+        if (saveAs) {
+          const d = await store.writeDataset({
+            path: saveAs, bytes, contentType, description: str(args.description), public: bool(args.public),
+            source: { url: finalUrl, method: 'agent', collectedAt: new Date().toISOString().slice(0, 10), notes: str(args.notes) },
+          })
+          const { bytes: used } = await store.usage(user.id)
+          Object.assign(info, { saved: { id: d.id, path: d.path, kind: d.kind, url: `${app}/d/${d.id}` }, storage_left: storageLeft(env, user, used).left })
+        }
+        const image = /^image\/(png|jpeg|gif|webp)$/.test(contentType)
+        // images are looked at, up to about 4 MB in one answer; one over 1 MB is described, not shown
+        if (image && bytes.length <= 1024 * 1024 && shown + bytes.length <= 4 * 1024 * 1024) {
+          shown += bytes.length
+          content.push({ type: 'text', text: JSON.stringify(info) }, { type: 'image', data: b64encode(bytes), mimeType: contentType })
+        } else if (image || !/^(text\/|application\/(json|xml|javascript|ld\+json|rss\+xml|atom\+xml))/.test(contentType) && !/\+json|\+xml/.test(contentType)) {
+          content.push({ type: 'text', text: JSON.stringify({ ...info, note: image ? 'Too big to show here (over 1 MB, or 4 MB in this answer); ask for a smaller size, e.g. name=small on pbs.twimg.com' : 'Binary; not shown' }) })
+        } else {
+          const body = new TextDecoder().decode(bytes)
+          content.push({ type: 'text', text: JSON.stringify({ ...info, length: body.length, truncated: body.length > limit }) }, { type: 'text', text: body.slice(0, limit) })
+        }
+      }
+      return { content, isError: false }
+    }
+
     case 'update_data': {
       const one = async (a: Record<string, unknown>) => {
         const d = await store.updateDatasetMeta(String(a.id ?? ''), { path: str(a.path), description: typeof a.description === 'string' ? a.description : undefined, transform: typeof a.transform === 'string' ? a.transform : undefined, public: bool(a.public), source: sourceOf(a.source) })
@@ -782,6 +848,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     }
 
     case 'edit_isle': {
+      const pageBefore = (await store.getIsle(String(args.id ?? ''))).row.source_blob
       const id = String(args.id ?? '')
       const { isle, row } = await store.getIsle(id)
       let html: string
@@ -799,7 +866,8 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, shortTitle: str(args.short_title), bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
         : await store.publishIsle({ id, html, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
       shootLater(ctx, env, out.id, islesOrigin(request, env))
-      return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, next: 'check_isle to see it' })
+      const carried = args.as_remix ? {} : await carryPage(store, out.id, out.version, pageBefore, !!args.propagate, str(args.note), changesOf(args.changes), (i) => shootLater(ctx, env, i, islesOrigin(request, env)))
+      return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, ...carried, next: 'check_isle to see it', ...(args.as_remix && !out.shortTitle ? { warning: 'No short_title, so the map will cut the title down to name it. Give it one: publish_isle with id and short_title.' } : {}) })
     }
 
     case 'edit_data': {
@@ -927,6 +995,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
 
     case 'publish_isle': {
       if (args.dry_run) return text(await dryRun(store, user, args))
+      const pageBefore = str(args.id) ? (await store.getIsle(str(args.id)!)).row.source_blob : null
       const { isle, madePublic } = await store.publishIsle({
         id: str(args.id),
         html: typeof args.html === 'string' ? args.html : undefined,
@@ -946,6 +1015,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         viewName: typeof args.view_name === 'string' ? args.view_name : undefined,
       })
       shootLater(ctx, env, isle.id, islesOrigin(request, env))
+      const carried = pageBefore ? await carryPage(store, isle.id, isle.version, pageBefore, !!args.propagate, str(args.note), changesOf(args.changes), (i) => shootLater(ctx, env, i, islesOrigin(request, env))) : {}
       const unbound = Object.entries(isle.bindings).filter(([, d]) => !d).map(([k]) => k)
       const missing = Object.keys(isle.slots).filter((k) => !(k in isle.bindings))
       return text({
@@ -953,7 +1023,9 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         version: isle.version,
         url: isleLink(isle),
         made_public: madePublic.map((d) => d.path),
+        ...carried,
         warnings: [
+          ...(isle.shortTitle ? [] : ['No short_title, so the map will cut the title down to name it. Give it one (one to four words, what is particular to it): publish_isle with id and short_title.']),
           ...unbound.map((k) => `slot "${k}" is bound to data that no longer exists`),
           ...missing.map((k) => `slot "${k}" has no data bound`),
         ],
@@ -1061,4 +1133,34 @@ async function dryRun(store: Store, user: UserRow, args: Record<string, unknown>
     slots: report,
     next: 'Compare each shape with what its slot description asks for; fix the data (derive_data, edit_data) and publish without dry_run.',
   }
+}
+
+/**
+ * After your own isle's page changed: with propagate, give the new page to your other isles that ran the
+ * old one (a version each, drawing from this one); without, say they're still on the old page.
+ */
+async function carryPage(
+  store: Store, id: string, version: number, before: string, propagate: boolean, note: string | undefined,
+  changes: { part: string; what: string }[] | undefined, shoot: (id: string) => void,
+): Promise<Record<string, unknown>> {
+  const { isle, row } = await store.getIsle(id)
+  if (row.source_blob === before) return {}
+  const others = await store.myIslesOnPage(before, id)
+  if (!others.length) return {}
+  if (!propagate) return { also_on_old_page: others, hint: `${others.length} more of your isles ran the old page; pass propagate: true (or publish_isle id + from) to give them this one` }
+  const carried: { id: string; version?: number; error?: string }[] = []
+  for (const o of others) {
+    try {
+      const { isle: out } = await store.publishIsle({
+        id: o, sourceBlob: row.source_blob, view: 'same',
+        note: `Took the page from "${isle.title}" v${version}${note ? `: ${note}` : ''}`,
+        drawsFrom: [{ isle: id, version, note: note ?? 'its page' }], changes,
+      })
+      shoot(out.id)
+      carried.push({ id: out.id, version: out.version })
+    } catch (e) {
+      carried.push({ id: o, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return { propagated: carried }
 }
