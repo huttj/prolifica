@@ -36,6 +36,12 @@ function cleanState(v: unknown): AnchorState | undefined {
 /** The app's URL for an isle's picture; the version in it changes when a newer picture exists. */
 export const shotUrl = (row: Pick<IsleRow, 'id' | 'shot_version'>) => `/api/isles/${row.id}/shot?v=${row.shot_version ?? 0}`
 
+/**
+ * The datasets with exactly the same contents as those in a recursive set (the same file saved twice,
+ * say by two agents working at once): for lineage, a copy is the same data.
+ */
+const TWINS = (set: string) => `SELECT t.id FROM ${set} JOIN datasets s ON s.id = ${set}.id JOIN datasets t ON t.blob = s.blob AND t.id != s.id AND t.deleted_at IS NULL`
+
 export class StoreError extends Error {
   constructor(public status: number, message: string) {
     super(message)
@@ -682,18 +688,20 @@ export class Store {
     // up to the originals, then down to everything made from them)
     const { results: cousinRows } = await this.d1
       .prepare(
-        `WITH RECURSIVE up(id, depth) AS (
-           SELECT value, 0 FROM json_each(?1)
+        `WITH RECURSIVE up(id) AS (
+           SELECT value FROM json_each(?1)
            UNION
-           SELECT e.dst_id, up.depth + 1 FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
-           WHERE up.depth < 24
+           SELECT e.dst_id FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+           UNION
+           ${TWINS('up')}
          ), roots(id) AS (
            SELECT id FROM up WHERE NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')
-         ), down(id, depth) AS (
-           SELECT id, 0 FROM roots
+         ), down(id) AS (
+           SELECT id FROM roots
            UNION
-           SELECT e.src_id, down.depth + 1 FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
-           WHERE down.depth < 24
+           SELECT e.src_id FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+           UNION
+           ${TWINS('down')}
          )
          SELECT DISTINCT i.* FROM isles i, json_each(i.bindings) j
          WHERE j.value IN (SELECT id FROM down) AND i.id != ?2 AND i.deleted_at IS NULL
@@ -1204,15 +1212,16 @@ export class Store {
     // the isles that show it, and those that show data made from it (with which)
     const { results } = await this.d1
       .prepare(
-        `WITH RECURSIVE down(id, depth) AS (
-           SELECT ?1, 0
+        `WITH RECURSIVE down(id) AS (
+           SELECT ?1
            UNION
-           SELECT e.src_id, down.depth + 1 FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
-           WHERE down.depth < 24
+           SELECT e.src_id FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+           UNION
+           ${TWINS('down')}
          )
          SELECT i.*, b.dst_id AS via_id FROM down JOIN edges b ON b.rel = 'binds' AND b.dst_kind = 'dataset' AND b.dst_id = down.id
          JOIN isles i ON i.id = b.src_id WHERE i.deleted_at IS NULL
-         ORDER BY down.depth, i.star_count DESC LIMIT 200`,
+         ORDER BY (b.dst_id = ?1) DESC, i.star_count DESC LIMIT 200`,
       )
       .bind(id)
       .all<IsleRow & { via_id: string }>()
@@ -1272,14 +1281,15 @@ export class Store {
       .prepare(
         `WITH RECURSIVE shown(id) AS (
            SELECT DISTINCT j.value FROM isles i, json_each(i.bindings) j WHERE i.deleted_at IS NULL AND i.visibility = 'public'
-         ), up(start, id, depth) AS (
-           SELECT id, id, 0 FROM shown
+         ), up(start, id) AS (
+           SELECT id, id FROM shown
            UNION
-           SELECT up.start, e.dst_id, up.depth + 1 FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
-           WHERE up.depth < 24
+           SELECT up.start, e.dst_id FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+           UNION
+           SELECT up.start, t.id FROM up JOIN datasets s ON s.id = up.id JOIN datasets t ON t.blob = s.blob AND t.id != s.id AND t.deleted_at IS NULL
          )
          SELECT DISTINCT up.start, d.id, d.path, d.kind, d.public, d.size FROM up JOIN datasets d ON d.id = up.id AND d.deleted_at IS NULL
-         WHERE up.depth > 0 AND NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')`,
+         WHERE up.id != up.start AND NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')`,
       )
       .all<{ start: string; id: string; path: string; kind: string; public: number; size: number }>()
     const dataIndex = new Map<string, number>()

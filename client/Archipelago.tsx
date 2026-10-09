@@ -178,8 +178,8 @@ function buildWorld(chart: SeaChart): World {
       shape: seed % 32,
       tint: (seed >>> 5) % 4,
       seed,
-      // data with no recorded sources is its own source
-      srcs: [...new Set(data.flatMap((d) => (chart.data[d]?.[3]?.length ? chart.data[d]![3]! : [d])))],
+      // what it shows and the originals behind it (an original's copies count among those)
+      srcs: [...new Set(data.flatMap((d) => [d, ...(chart.data[d]?.[3] ?? [])]))],
       page: page ?? -1 - n,
       view: -1,
       short: short?.trim() || null,
