@@ -426,7 +426,7 @@ export class Store {
     return Promise.all(results.map((r) => this.toDataset(r)))
   }
 
-  async writeDataset(input: WriteDataInput): Promise<Dataset> {
+  async writeDataset(input: WriteDataInput): Promise<Dataset & { kept?: string }> {
     const me = this.requireViewer()
     const path = normalizePath(input.path)
     let existing: DatasetRow | null = null
@@ -438,6 +438,15 @@ export class Store {
     }
     const contentType = contentTypeFor(path, input.contentType ?? existing?.content_type)
     const hash = await sha256Hex(input.bytes)
+    // the same file saved again as new data (two agents at once, an upload then a copy): keep the one you
+    // have instead of making a twin. Small files are left alone: identical placeholders aren't one dataset.
+    if (!existing && input.bytes.byteLength >= 4096) {
+      const twin = await this.d1
+        .prepare('SELECT * FROM datasets WHERE owner_id = ? AND blob = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1')
+        .bind(me.id, hash)
+        .first<DatasetRow>()
+      if (twin) return this.keepTwin(twin, path, input)
+    }
     await this.checkQuota(me.id, hash, input.bytes.byteLength, existing ? { dataset: existing.id } : undefined)
     await this.putBlob(input.bytes, contentType)
 
@@ -482,6 +491,38 @@ export class Store {
       ])
     }
     return (await this.getDataset(id)).dataset
+  }
+
+  /**
+   * A new write that matched data you already have: the existing dataset stays, picking up what the write
+   * knew that it didn't (a description, provenance, what it was made from), and an upload still in
+   * uploads/ moves to where the write wanted it.
+   */
+  private async keepTwin(twin: DatasetRow, path: string, input: WriteDataInput): Promise<Dataset & { kept: string }> {
+    const me = this.requireViewer()
+    const sets: string[] = []
+    const vals: unknown[] = []
+    if (twin.path.startsWith('uploads/') && path !== twin.path) {
+      const clash = await this.d1.prepare('SELECT id FROM datasets WHERE owner_id = ? AND path = ? AND deleted_at IS NULL').bind(me.id, path).first()
+      if (!clash) { sets.push('path = ?'); vals.push(path) }
+    }
+    if (!twin.description && input.description) { sets.push('description = ?'); vals.push(input.description) }
+    if (!twin.transform && input.transform) { sets.push('transform = ?'); vals.push(input.transform) }
+    if (input.public && !twin.public) { sets.push('public = 1') }
+    if (sets.length) await this.d1.prepare(`UPDATE datasets SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).bind(...vals, Date.now(), twin.id).run()
+    if (input.source && (!twin.source_method || twin.source_method === 'upload')) await this.applySource(twin.id, input.source)
+    if (input.derivedFrom?.length) {
+      const has = await this.d1.prepare(`SELECT 1 FROM edges WHERE src_kind = 'dataset' AND src_id = ? AND rel = 'derived' LIMIT 1`).bind(twin.id).first()
+      if (!has) {
+        const now = Date.now()
+        for (const pid of input.derivedFrom) {
+          const p = await this.datasetRow(pid)
+          if (!p || !this.canReadDataset(p) || p.id === twin.id) continue
+          await this.d1.prepare(`INSERT OR IGNORE INTO edges (src_kind, src_id, rel, dst_kind, dst_id, created_at) VALUES ('dataset', ?, 'derived', 'dataset', ?, ?)`).bind(twin.id, p.id, now).run()
+        }
+      }
+    }
+    return { ...(await this.getDataset(twin.id)).dataset, kept: path }
   }
 
   async updateDatasetMeta(id: string, patch: { path?: string; description?: string | null; transform?: string | null; public?: boolean; source?: SourceInput }): Promise<Dataset> {

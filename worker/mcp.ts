@@ -702,7 +702,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         source: sourceOf(args.source),
       })
       const { bytes: used } = await store.usage(user.id)
-      return text({ id: d.id, path: d.path, kind: d.kind, size: fmtBytes(d.size), public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left })
+      return text({ id: d.id, path: d.path, kind: d.kind, size: fmtBytes(d.size), public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left, ...alreadyHad(d) })
     }
 
     case 'fetch_url': {
@@ -728,7 +728,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
             source: { url: finalUrl, method: 'agent', collectedAt: new Date().toISOString().slice(0, 10), notes: str(args.notes) },
           })
           const { bytes: used } = await store.usage(user.id)
-          Object.assign(info, { saved: { id: d.id, path: d.path, kind: d.kind, url: `${app}/d/${d.id}` }, storage_left: storageLeft(env, user, used).left })
+          Object.assign(info, { saved: { id: d.id, path: d.path, kind: d.kind, url: `${app}/d/${d.id}` }, storage_left: storageLeft(env, user, used).left, ...alreadyHad(d) })
         }
         const image = /^image\/(png|jpeg|gif|webp)$/.test(contentType)
         // images are looked at, up to about 4 MB in one answer; one over 1 MB is described, not shown
@@ -974,7 +974,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         id: d.id, path: d.path, kind: d.kind, size: fmtBytes(d.size), rows: Array.isArray(out) ? out.length : undefined,
         from: sources.map((x) => ({ ...(x.name ? { as: '$' + x.name } : {}), id: x.src.id, path: x.src.path, size: fmtBytes(x.src.size) })),
         sample: Array.isArray(out) ? out.slice(0, 2) : undefined,
-        public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left,
+        public: d.public, url: `${app}/d/${d.id}`, storage_left: storageLeft(env, user, used).left, ...alreadyHad(d),
       })
     }
 
@@ -1163,4 +1163,10 @@ async function carryPage(
     }
   }
   return { propagated: carried }
+}
+
+/** When a write matched data the person already had: say so, so the agent uses that one. */
+function alreadyHad(d: { kept?: string; path: string; id: string }) {
+  if (!d.kept) return {}
+  return { already_had: `That exact file is already their data${d.path === d.kept ? '' : ` at ${d.path}`} (id ${d.id}), so no copy was made${d.path === d.kept ? ' (it was moved here from uploads/)' : ''}. Use this id; move it with update_data if it belongs elsewhere.` }
 }

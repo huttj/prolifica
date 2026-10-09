@@ -58,11 +58,13 @@ export function MyData() {
   const upload = async (files: FileList | File[]) => {
     setBusy(true)
     try {
+      const had: string[] = []
       for (const f of Array.from(files)) {
         const path = (folder.trim() ? folder.trim().replace(/\/+$/, '') + '/' : '') + f.name
-        await api.upload(path, f)
+        const d = (await api.upload(path, f)) as Dataset & { kept?: string }
+        if (d.kept && d.path !== d.kept) had.push(d.path)
       }
-      toast(files.length === 1 ? 'Saved' : `Saved ${files.length} files`)
+      toast(had.length ? `Already in your data: ${had.join(', ')}` : files.length === 1 ? 'Saved' : `Saved ${files.length} files`)
       list.reload()
       refresh()
     } catch (e) {
