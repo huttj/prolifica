@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import type { Dataset, Isle, IsleSources } from '../shared/types'
 import { api } from './api'
 import { AskAiButton } from './ask'
+import { DataTree } from './DataTree'
 import { DataSources } from './Sources'
 import { Icon, Link, Modal, useAsync, useSession } from './ui'
 
@@ -10,8 +11,6 @@ import { Icon, Link, Modal, useAsync, useSession } from './ui'
  * ask you to bind slots by hand: you bring the data (pick some, drop files, or say what to fetch) and
  * your AI fits it to the isle, publishes your version and tests it with check_isle until it works.
  */
-
-const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 
 export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, notes: string, origin: string, sources?: IsleSources) {
   const url = `${origin}/i/${isle.id}`
@@ -49,7 +48,6 @@ export function UseMyDataModal({ isle, onClose }: { isle: Isle; onClose: () => v
   const mine = useAsync(() => (me ? api.data() : Promise.resolve([] as Dataset[])), [me?.id])
   const [extra, setExtra] = useState<Dataset[]>([])
   const [chosen, setChosen] = useState<Set<string>>(new Set())
-  const [q, setQ] = useState('')
   const [fetchWhat, setFetchWhat] = useState('')
   const [notes, setNotes] = useState('')
   const [over, setOver] = useState(false)
@@ -60,9 +58,8 @@ export function UseMyDataModal({ isle, onClose }: { isle: Isle; onClose: () => v
     const seen = new Set(extra.map((d) => d.id))
     return [...extra, ...(mine.data ?? []).filter((d) => !seen.has(d.id)).sort((a, b) => b.updatedAt - a.updatedAt)]
   }, [extra, mine.data])
-  const shown = q.trim() ? all.filter((d) => d.path.toLowerCase().includes(q.trim().toLowerCase()) || (d.description ?? '').toLowerCase().includes(q.trim().toLowerCase())) : all
   const picked = all.filter((d) => chosen.has(d.id))
-  const toggle = (id: string) => setChosen((c) => { const n = new Set(c); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const setPicked = (ids: string[], on: boolean) => setChosen((c) => { const n = new Set(c); for (const id of ids) on ? n.add(id) : n.delete(id); return n })
 
   const upload = async (files: FileList | File[]) => {
     const list = Array.from(files)
@@ -127,22 +124,11 @@ export function UseMyDataModal({ isle, onClose }: { isle: Isle; onClose: () => v
                   <b className="small grow">Your data</b>
                   {picked.length > 0 && <span className="tiny muted">{picked.length} chosen</span>}
                 </div>
-                <input className="field" placeholder="Search your data" value={q} onChange={(e) => setQ(e.target.value)} />
-                <div className="umd-list">
-                  {mine.loading && !all.length && <div className="tiny muted" style={{ padding: 10 }}>Loading…</div>}
-                  {!mine.loading && !all.length && <div className="tiny muted" style={{ padding: 10 }}>Nothing yet. Drop a file, or ask your AI to fetch it.</div>}
-                  {shown.map((d) => (
-                    <label key={d.id} className={`umd-item ${chosen.has(d.id) ? 'on' : ''}`}>
-                      <input type="checkbox" checked={chosen.has(d.id)} onChange={() => toggle(d.id)} />
-                      <span className="grow" style={{ minWidth: 0 }}>
-                        <span className="ellipsis small" style={{ display: 'block' }}>{d.path}</span>
-                        {d.description && <span className="ellipsis tiny muted" style={{ display: 'block' }}>{d.description}</span>}
-                      </span>
-                      <span className="kind">{d.kind}</span>
-                      <span className="tiny muted">{fmtSize(d.size)}</span>
-                    </label>
-                  ))}
-                </div>
+                {mine.loading && !all.length ? (
+                  <div className="tiny muted" style={{ padding: 10 }}>Loading…</div>
+                ) : (
+                  <DataTree datasets={all} storageKey="pick" pick={{ chosen, setChosen: setPicked }} compact empty="Nothing yet. Drop a file, or ask your AI to fetch it." />
+                )}
               </section>
               <section>
                 <b className="small" style={{ display: 'block', marginBottom: 6 }}>Upload</b>

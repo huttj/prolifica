@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { COLLECTION_METHODS, type Isle, type IsleSource } from '../shared/types'
+import { COLLECTION_METHODS, type DatasetRef, type Isle, type IsleSource } from '../shared/types'
 import { ago, api, who } from './api'
 import { Icon, Link, useAsync, useSession } from './ui'
 
@@ -9,6 +9,26 @@ import { Icon, Link, useAsync, useSession } from './ui'
  * an extension, a userscript) means they have to do it themselves, so the collector is offered right
  * here, with a plain warning: it runs on that site as them.
  */
+
+/** Sources collected the same way from the same site, shown as one: you only need the collector once. */
+interface SourceGroup {
+  /** the one whose notes and collector are shown: the latest that has a collector */
+  lead: IsleSource
+  datasets: DatasetRef[]
+  slots: string[]
+}
+
+function groupSources(sources: IsleSource[]): SourceGroup[] {
+  const groups = new Map<string, IsleSource[]>()
+  for (const s of sources) {
+    const key = s.site && s.method ? `${s.method}|${s.site}` : `d|${s.dataset.id}`
+    groups.set(key, [...(groups.get(key) ?? []), s])
+  }
+  return [...groups.values()].map((list) => {
+    const byRecent = [...list].sort((a, b) => Number(!!b.code) - Number(!!a.code) || (b.collectedAt ?? 0) - (a.collectedAt ?? 0))
+    return { lead: byRecent[0]!, datasets: list.map((s) => s.dataset), slots: [...new Set(list.flatMap((s) => s.slots))] }
+  })
+}
 
 export function DataSources({ isle, compact = false }: { isle: Isle; compact?: boolean }) {
   const src = useAsync(() => api.isleSources(isle.id), [isle.id, isle.version])
@@ -21,13 +41,15 @@ export function DataSources({ isle, compact = false }: { isle: Isle; compact?: b
         <b className="small grow">Where this data came from</b>
         {self.length > 0 && <span className="src-flag">you collect it yourself</span>}
       </div>
-      {sources.map((s) => <SourceCard key={s.dataset.id} s={s} site={sites.find((x) => x.site === s.site) ?? null} compact={compact} />)}
+      {groupSources(sources).map((g) => <SourceCard key={g.lead.dataset.id} g={g} site={sites.find((x) => x.site === g.lead.site) ?? null} compact={compact} />)}
     </div>
   )
 }
 
-function SourceCard({ s, site, compact }: { s: IsleSource; site: { site: string; datasets: number; collectors: number; people: number } | null; compact: boolean }) {
+function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string; datasets: number; collectors: number; people: number } | null; compact: boolean }) {
+  const s = g.lead
   const [open, setOpen] = useState(false)
+  const owners = [...new Map(g.datasets.map((d) => [d.owner.id, d.owner])).values()]
   const how = s.method ? COLLECTION_METHODS[s.method] : 'Unknown method'
   return (
     <div className={`src-card ${s.selfServe ? 'self' : ''}`}>
@@ -39,7 +61,12 @@ function SourceCard({ s, site, compact }: { s: IsleSource; site: { site: string;
         {s.collectedAt && <span className="tiny muted">{ago(s.collectedAt)}</span>}
       </div>
       <div className="tiny muted" style={{ marginTop: 2 }}>
-        feeds {s.slots.map((x, i) => <span key={x}>{i ? ', ' : ''}<code>{x}</code></span>)} · collected by {who(s.dataset.owner)} · <Link to={`/d/${s.dataset.id}`}>the original data</Link>
+        feeds {g.slots.map((x, i) => <span key={x}>{i ? ', ' : ''}<code>{x}</code></span>)} · collected by {owners.map((o, i) => <span key={o.id}>{i ? ', ' : ''}{who(o)}</span>)} ·{' '}
+        {g.datasets.length === 1 ? (
+          <Link to={`/d/${s.dataset.id}`}>the original data</Link>
+        ) : (
+          <>the originals: {g.datasets.map((d, i) => <span key={d.id}>{i ? ', ' : ''}<Link to={`/d/${d.id}`}>{d.path.split('/').slice(-2).join('/')}</Link></span>)}</>
+        )}
       </div>
       {s.selfServe ? (
         <p className="small" style={{ margin: '6px 0 0' }}>

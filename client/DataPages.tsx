@@ -6,6 +6,7 @@ import { ago, api, fmtBytes, type SourcePatch, who } from './api'
 import { JsonView } from './JsonView'
 import { FoldedMarkdown, Markdown } from './Markdown'
 import { navigate } from './navigate'
+import { DataTree } from './DataTree'
 import { Legend, ThreadView } from './Tree'
 import { ErrorBox, Icon, Link, Modal, PersonLink, useAsync, useSession } from './ui'
 
@@ -51,12 +52,6 @@ export function MyData() {
     }
   }
 
-  const groups = new Map<string, Dataset[]>()
-  for (const d of list.data ?? []) {
-    const f = d.path.includes('/') ? d.path.slice(0, d.path.lastIndexOf('/')) : ''
-    groups.set(f, [...(groups.get(f) ?? []), d])
-  }
-
   return (
     <div className="wrap">
       <div className="page-head row" style={{ justifyContent: 'space-between' }}>
@@ -89,27 +84,9 @@ export function MyData() {
         <p className="tiny" style={{ margin: '10px 0 0' }}>Or have your agent write data with <code>write_data</code>; transformations keep a line back to what they came from.</p>
       </div>
 
-      <div className="card" style={{ marginTop: 16, overflow: 'hidden' }}>
+      <div style={{ marginTop: 16 }}>
         {list.error && <ErrorBox error={list.error} />}
-        {list.data && !list.data.length && <div className="empty" style={{ border: 0 }}>No data yet.</div>}
-        {[...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([f, items]) => (
-          <div key={f}>
-            {f && <div className="folder">▸ {f}/</div>}
-            <div className="files">
-              {items.map((d) => (
-                <Link key={d.id} to={`/d/${d.id}`} className="file">
-                  <span className="kind">{d.kind}</span>
-                  <span className="grow ellipsis">{f ? d.path.slice(f.length + 1) : d.path}</span>
-                  {d.derivedFrom.length > 0 && <span className="chip accent">derived</span>}
-                  {d.source?.method && d.source.method !== 'upload' && <span className="chip">{COLLECTION_METHODS[d.source.method]}</span>}
-                  {d.public && <span className="chip">public</span>}
-                  <span className="tiny muted" style={{ width: 70, textAlign: 'right' }}>{fmtBytes(d.size)}</span>
-                  <span className="tiny muted hide-sm" style={{ width: 80, textAlign: 'right' }}>{ago(d.updatedAt)}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        ))}
+        {list.data && <DataTree datasets={list.data} storageKey="data" />}
       </div>
       <div style={{ height: 60 }} />
     </div>

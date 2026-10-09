@@ -11,7 +11,7 @@ import {
   EmojiPicker, ErrorBox, Icon, Link, Modal, PersonLink, RelationChip, SizedFrame, useAsync, useSession,
 } from './ui'
 
-type Tab = 'notes' | 'changes' | 'family' | 'data' | 'history'
+type Tab = 'notes' | 'family' | 'data' | 'history'
 type Picked = { anchor: Anchor; snippet: string | null }
 
 const LAYERS: { id: Layer; label: string }[] = [
@@ -39,6 +39,8 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   // the comment whose piece is ringed in the isle right now
   const [focusedComment, setFocusedComment] = useState<string | null>(null)
   const [remixOpen, setRemixOpen] = useState(false)
+  // the change list: the owner's "Ask for changes", or someone else's "Remix with changes"
+  const [changesOpen, setChangesOpen] = useState(false)
   const [useDataOpen, setUseDataOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // the side panel's width, dragged by its edge and remembered per browser
@@ -99,7 +101,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
         setPicking(false)
         if (pickFor === 'change') {
           setChangeDraft({ anchor: m.anchor })
-          setTab('changes')
+          setChangesOpen(true)
         } else {
           setActive({ anchor: m.anchor, snippet: m.snippet ?? null })
           setTab('notes')
@@ -178,6 +180,31 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   }
   /** Show a marked piece: the isle restores the view it was marked in, then scrolls to it and rings it. */
   const focusEl = (anchor: Anchor | null) => post({ t: 'focus', selector: anchor?.selector ?? null, state: anchor?.state, mode: 'ring' })
+  // stays mounted (hidden) while a piece is being picked, so a half-written change survives the pick
+  const pickingChange = picking && pickFor === 'change'
+  const changesPopover = (
+    <div className="pop-right" style={pickingChange ? { display: 'none' } : undefined}>
+      <Changes
+        isle={i}
+        mine={mine}
+        notes={changes}
+        setNotes={setChanges}
+        draft={changeDraft}
+        setDraft={setChangeDraft}
+        picking={pickingChange}
+        startPicking={() => {
+          setPickFor('change')
+          setPicking(true)
+        }}
+        focusEl={focusEl}
+        onClose={() => {
+          setChangesOpen(false)
+          if (pickingChange) setPicking(false)
+        }}
+        toast={toast}
+      />
+    </div>
+  )
 
   return (
     <div className="isle-page">
@@ -225,29 +252,43 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
         >
           <Icon name="pick" /> {picking && pickFor === 'mark' ? 'Picking…' : 'Mark a piece'}
         </button>
-        <button
-          className={`btn ${tab === 'changes' ? 'on' : ''}`}
-          onClick={() => {
-            setTab('changes')
-            setPickFor('change')
-            setPicking(true)
-          }}
-          title="Point at pieces, say what should change, and hand the list to your AI"
-        >
-          <Icon name="edit" /> Ask for changes{changes.length ? ` (${changes.length})` : ''}
-        </button>
+        {mine && (
+          <span className="pop-anchor">
+            <button
+              className={`btn ${changesOpen ? 'on' : ''}`}
+              onClick={() => {
+                if (picking && pickFor === 'change') setPicking(false)
+                setRemixOpen(false)
+                setChangesOpen((o) => !o)
+              }}
+              aria-expanded={changesOpen}
+              title="Point at pieces, say what should change, and hand the list to your AI"
+            >
+              <Icon name="edit" /> {picking && pickFor === 'change' ? 'Picking…' : 'Ask for changes'}{changes.length ? ` (${changes.length})` : ''}
+            </button>
+            {changesOpen && changesPopover}
+          </span>
+        )}
         <span className="pop-anchor">
-          <button className={`btn primary ${remixOpen ? 'on' : ''}`} onClick={() => setRemixOpen((o) => !o)} aria-expanded={remixOpen}>
-            <Icon name="remix" /> Remix
+          <button
+            className={`btn primary ${remixOpen ? 'on' : ''}`}
+            onClick={() => {
+              setChangesOpen(false)
+              setRemixOpen((o) => !o)
+            }}
+            aria-expanded={remixOpen}
+          >
+            <Icon name="remix" /> Remix{!mine && changes.length ? ` (${changes.length})` : ''}
           </button>
           {remixOpen && (
             <RemixPopover
               isle={i}
               onClose={() => setRemixOpen(false)}
               onUseData={() => { setRemixOpen(false); setUseDataOpen(true) }}
-              onAskChanges={() => { setRemixOpen(false); setTab('changes'); setPickFor('change'); setPicking(true) }}
+              onAskChanges={mine ? undefined : () => { setRemixOpen(false); setChangesOpen(true) }}
             />
           )}
+          {!mine && changesOpen && changesPopover}
         </span>
         <button className={`btn ghost ${tab ? 'on' : ''}`} onClick={() => setTab((t) => (t ? null : 'notes'))} title="Notes, family, data, history">
           <Icon name="panel" />
@@ -297,7 +338,6 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
             <div className="panel-grip" onPointerDown={startResize} onDoubleClick={() => { setPanelW(360); try { localStorage.removeItem(PANEL_KEY) } catch { /* storage unavailable */ } }} role="separator" aria-orientation="vertical" aria-label="Drag to resize the panel; double-click to reset" title="Drag to resize · double-click to reset" />
             <div className="tabs">
               <button className={tab === 'notes' ? 'on' : ''} onClick={() => setTab('notes')}>Notes</button>
-              <button className={tab === 'changes' ? 'on' : ''} onClick={() => setTab('changes')}>Changes{changes.length ? ` ${changes.length}` : ''}</button>
               <button className={tab === 'family' ? 'on' : ''} onClick={() => setTab('family')}>Family</button>
               <button className={tab === 'data' ? 'on' : ''} onClick={() => setTab('data')}>Data</button>
               <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History</button>
@@ -318,24 +358,6 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
                   focused={focusedComment}
                   setFocused={setFocusedComment}
                   requireMe={requireMe}
-                  toast={toast}
-                />
-              )}
-              {tab === 'changes' && (
-                <Changes
-                  isle={i}
-                  mine={mine}
-                  notes={changes}
-                  setNotes={setChanges}
-                  draft={changeDraft}
-                  setDraft={setChangeDraft}
-                  picking={picking && pickFor === 'change'}
-                  startPicking={() => {
-                    setPickFor('change')
-                    setPicking(true)
-                  }}
-                  stopPicking={() => setPicking(false)}
-                  focusEl={focusEl}
                   toast={toast}
                 />
               )}
@@ -381,6 +403,11 @@ function CommentReactions({ reactions, onReact }: { reactions: Record<string, { 
   )
 }
 
+/**
+ * The change list, as a popover under "Ask for changes" (the owner: their AI updates the isle) or under
+ * Remix (anyone else: their AI makes their own version). Closes on Escape or a click elsewhere; the list
+ * itself is kept for the tab, so closing loses nothing.
+ */
 function Changes(props: {
   isle: Isle
   mine: boolean
@@ -390,16 +417,31 @@ function Changes(props: {
   setDraft: (d: { anchor: Anchor | null } | null) => void
   picking: boolean
   startPicking: () => void
-  stopPicking: () => void
   focusEl: (anchor: Anchor | null) => void
+  onClose: () => void
   toast: (m: string) => void
 }) {
-  const { isle, mine, notes, setNotes, draft, setDraft, picking, startPicking, stopPicking, focusEl, toast } = props
+  const { isle, mine, notes, setNotes, draft, setDraft, picking, startPicking, focusEl, onClose, toast } = props
   const [text, setText] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
+  const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (draft) box.current?.focus()
-  }, [draft])
+    if (!picking) box.current?.focus()
+  }, [draft, picking])
+  useEffect(() => {
+    if (picking) return
+    const away = (e: PointerEvent) => {
+      const t = e.target as Element
+      if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor')) onClose()
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('pointerdown', away)
+    window.addEventListener('keydown', esc)
+    return () => {
+      window.removeEventListener('pointerdown', away)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [picking, onClose])
   const anchor = draft?.anchor ?? null
   const add = () => {
     if (!text.trim()) return
@@ -409,9 +451,13 @@ function Changes(props: {
   }
   const prompt = changesPrompt(isle, notes, mine, location.origin)
   return (
-    <div>
-      <p className="small muted" style={{ marginTop: 0 }}>
-        Point at pieces and say what should change. The list goes to your AI as one prompt, then it's forgotten: nothing here is saved or shown to anyone.
+    <div className="popover card changes-pop" ref={ref} role="dialog">
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <b className="grow">{mine ? 'Ask for changes' : 'Remix with changes'}</b>
+        <button className="btn ghost sm" style={{ margin: '-4px -6px 0 0' }} onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+      </div>
+      <p className="tiny muted" style={{ margin: '2px 0 8px' }}>
+        Point at pieces and say what should change. The list goes to your AI as one prompt{mine ? ' and it updates this isle' : ', which makes your own version (this one stays as it is)'}. Nothing here is saved or shown to anyone.
       </p>
       <div className="compose">
         <div className="row compose-head" style={{ marginBottom: 8 }}>
@@ -422,13 +468,11 @@ function Changes(props: {
               <button className="btn ghost sm compose-x" onClick={() => setDraft(null)} title="About the whole isle instead" aria-label="About the whole isle instead"><Icon name="close" /></button>
             </>
           ) : (
-            <span className="small muted">About the whole isle</span>
-          )}
-          {!anchor && <span className="grow" />}
-          {!anchor && (
-            <button className={`btn sm ${picking ? 'on' : ''}`} onClick={() => (picking ? stopPicking() : startPicking())}>
-              <Icon name="pick" /> {picking ? 'Click a piece…' : 'Pick a piece'}
-            </button>
+            <>
+              <span className="small muted">About the whole isle</span>
+              <span className="grow" />
+              <button className="btn sm" onClick={startPicking}><Icon name="pick" /> Pick a piece</button>
+            </>
           )}
         </div>
         <textarea
@@ -445,9 +489,7 @@ function Changes(props: {
         </div>
       </div>
 
-      {notes.length === 0 ? (
-        <p className="small muted" style={{ textAlign: 'center', padding: 12 }}>No changes yet.</p>
-      ) : (
+      {notes.length > 0 && (
         <>
           <ol className="change-list">
             {notes.map((n) => (
@@ -466,9 +508,11 @@ function Changes(props: {
           </ol>
           <div className="row" style={{ marginTop: 10 }}>
             <AskAiButton
+              label={mine ? 'Ask' : 'Remix with'}
               prompt={prompt}
               onAsk={() => {
                 setNotes([])
+                onClose()
                 toast(mine ? 'Handed over; your AI will update the isle' : 'Handed over; your AI will make your version')
               }}
             />
@@ -478,9 +522,9 @@ function Changes(props: {
             <span className="grow" />
             <button className="btn ghost sm" onClick={() => setNotes([])}>Clear</button>
           </div>
-          <p className="tiny muted">{mine ? 'Your AI updates this isle (a new version).' : "It's not yours, so your AI makes your own remix."} Needs Prolifica connected to your AI (<Link to="/connect">how</Link>).</p>
         </>
       )}
+      <p className="tiny muted" style={{ margin: '8px 0 0' }}>Needs Prolifica connected to your AI (<Link to="/connect">how</Link>).</p>
     </div>
   )
 }
@@ -923,7 +967,7 @@ function History({ isle, viewing, setViewing }: { isle: Isle; viewing: IsleVersi
 }
 
 /** Remix starts with what you want different; the AI makes a new isle with a line back to this one. */
-function RemixPopover({ isle, onClose, onUseData, onAskChanges }: { isle: Isle; onClose: () => void; onUseData: () => void; onAskChanges: () => void }) {
+function RemixPopover({ isle, onClose, onUseData, onAskChanges }: { isle: Isle; onClose: () => void; onUseData: () => void; onAskChanges?: () => void }) {
   const url = `${location.origin}/i/${isle.id}`
   return (
     <AskPopover
@@ -938,7 +982,7 @@ function RemixPopover({ isle, onClose, onUseData, onAskChanges }: { isle: Isle; 
     >
       <div className="pop-alt">
         <button className="btn ghost sm" onClick={onUseData}><Icon name="data" /> Same look, my data</button>
-        <button className="btn ghost sm" onClick={onAskChanges}><Icon name="pick" /> Point at pieces</button>
+        {onAskChanges && <button className="btn ghost sm" onClick={onAskChanges}><Icon name="pick" /> Point at pieces</button>}
       </div>
       <p className="tiny muted" style={{ margin: '6px 0 0' }}>Not connected yet? <Link to="/connect">Connect your AI</Link>.</p>
     </AskPopover>
