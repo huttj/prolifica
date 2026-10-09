@@ -944,8 +944,8 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     // titles wrap beside the island; more lines as you get closer
     const lines = m.label ? wrapText(ctx, m.label, Math.max(140, Math.min(220, r * 2.4)), 2) : []
     const cx = sx(m.x), cy = sy(m.y)
-    // who made it shows when you point at it
-    const sub = hover?.isle === m || !lines.length ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
+    // who made it is in the card; a name only stands in for it when there's no title
+    const sub = lines.length ? '' : m.by
     ctx.font = `500 11px ${t.font}`
     const subW = sub ? ctx.measureText(sub).width : 0
     ctx.font = `600 12px ${t.font}`
