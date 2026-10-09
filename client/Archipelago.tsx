@@ -635,6 +635,20 @@ type Target = { isle: Isl; shoal?: undefined } | { shoal: Shoal; isle?: undefine
 
 const trim = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
+/** Wrapped as narrowly as the same number of lines allows, so the lines come out about even. */
+function balanced(ctx: CanvasRenderingContext2D, text: string, width: number, max: number): string[] {
+  const lines = wrapText(ctx, text, width, max)
+  if (lines.length < 2 || lines.some((l) => l.endsWith('…'))) return lines
+  let lo = width / lines.length, hi = width
+  while (hi - lo > 2) {
+    const mid = (lo + hi) / 2
+    const t = wrapText(ctx, text, mid, max)
+    if (t.length === lines.length && !t.some((l) => l.endsWith('…'))) hi = mid
+    else lo = mid
+  }
+  return wrapText(ctx, text, hi, max)
+}
+
 /** Break text into at most `max` lines no wider than `width`, with an ellipsis if it doesn't fit. */
 function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number, max: number): string[] {
   const fits = (l: string) => ctx.measureText(l).width <= width
@@ -930,6 +944,28 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       const ox = sx(o.x), oy = sy(o.y)
       return Math.hypot(ox - Math.max(a, Math.min(c, ox)), oy - Math.max(b, Math.min(d, oy))) < o.r * k * 0.95
     })
+  // each view's group is named over its shelf, the way a chart names an island group; first, so the
+  // islands' names keep clear of it
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `italic 600 12px ${t.font}`
+  for (const f of fams) {
+    if (!f.name) continue
+    const top = f.members.reduce((a, m) => (m.y - m.r < a.y - a.r ? m : a), f.members[0]!)
+    const cx = f.members.reduce((t2, m) => t2 + m.x, 0) / f.members.length
+    const x = sx(cx)
+    const y = sy(top.y) - top.r * k * 2.3 - 8
+    if (f.R * k < (f.members.length > 1 ? 40 : 22) || y < 14 || y > H || x < -100 || x > W + 100) continue
+    const label = trim(plural(f.name).toUpperCase(), 40)
+    const spaced = label.split('').join('\u2009')
+    const tw = ctx.measureText(spaced).width
+    if (!free(x - tw / 2, y - 12, x + tw / 2, y + 4)) continue
+    ctx.globalAlpha = lit.size && !f.members.some((m2) => lit.has(m2)) ? 0.35 : 1
+    ctx.fillStyle = t.bankInk
+    ctx.fillText(spaced, x, y)
+    ctx.globalAlpha = 1
+  }
+  ctx.globalAlpha = 1
   const placed: Placed[] = []
   const cands = shown
     .filter((m) => m.r * k >= (m.kids.length ? 6 : 9))
@@ -942,7 +978,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     const r = m.r * k
     ctx.font = `600 12px ${t.font}`
     // titles wrap beside the island; more lines as you get closer
-    const lines = m.label ? wrapText(ctx, m.label, Math.max(140, Math.min(220, r * 2.4)), 2) : []
+    const lines = m.label ? balanced(ctx, m.label, Math.max(110, Math.min(180, r * 1.8)), 2) : []
     const cx = sx(m.x), cy = sy(m.y)
     // who made it is in the card; a name only stands in for it when there's no title
     const sub = lines.length ? '' : m.by
@@ -984,24 +1020,6 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     }
   }
   ctx.globalAlpha = 1
-  // each view's group is named over its shelf, the way a chart names an island group
-  ctx.font = `italic 600 12px ${t.font}`
-  for (const f of fams) {
-    if (!f.name) continue
-    const top = f.members.reduce((a, m) => (m.y - m.r < a.y - a.r ? m : a), f.members[0]!)
-    const cx = f.members.reduce((t2, m) => t2 + m.x, 0) / f.members.length
-    const x = sx(cx)
-    const y = sy(top.y) - top.r * k * 2.3 - 8
-    if (f.R * k < (f.members.length > 1 ? 40 : 22) || y < 14 || y > H || x < -100 || x > W + 100) continue
-    const label = trim(plural(f.name).toUpperCase(), 40)
-    const spaced = label.split('').join('\u2009')
-    const tw = ctx.measureText(spaced).width
-    if (!free(x - tw / 2, y - 12, x + tw / 2, y + 4)) continue
-    ctx.globalAlpha = lit.size && !f.members.some((m2) => lit.has(m2)) ? 0.35 : 1
-    ctx.fillStyle = t.bankInk
-    ctx.fillText(spaced, x, y)
-    ctx.globalAlpha = 1
-  }
   return placed
 }
 
