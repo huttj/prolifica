@@ -379,13 +379,17 @@ function detailOf(title: string, group: string): string {
   return t
 }
 
-/** At most three words, for the map, when the publisher didn't give a short title. */
+/** Two short lines' worth (about five words), for the map, when the publisher didn't give a short title. */
 function shortOf(text: string): string {
   const head = text.split(/\s[—–|]\s|:\s|\s\(/)[0]!.trim()
   const words = head.split(/\s+/).filter(Boolean)
-  if (words.length <= 3) return head
+  if (words.length <= 5 && head.length <= 32) return head
   const stop = /^(a|an|the|of|on|in|at|to|for|by|as|and|or|from|with|who|what|is|are|was)$/i
-  const pick = words.slice(0, 3)
+  const pick: string[] = []
+  for (const w of words) {
+    if (pick.length >= 5 || [...pick, w].join(' ').length > 28) break
+    pick.push(w)
+  }
   while (pick.length > 1 && stop.test(pick[pick.length - 1]!)) pick.pop()
   return pick.join(' ') + '…'
 }
