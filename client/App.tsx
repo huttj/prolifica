@@ -70,7 +70,7 @@ export function App() {
   else if ((m = /^\/i\/([a-z0-9]+)\/?$/.exec(path))) page = <IslePage id={m[1]!} />
   else if ((m = /^\/i\/([a-z0-9]+)\/family\/?$/.exec(path))) page = <IslePage id={m[1]!} family />
   else if ((m = /^\/d\/([a-z0-9]+)\/?$/.exec(path))) page = <DataPage id={m[1]!} />
-  else if ((m = /^\/@([a-z0-9_-]+)\/?$/i.exec(path))) page = <Profile handle={m[1]!.toLowerCase()} tab={query.get('tab')} />
+  else if ((m = /^\/(?:@|%40)([a-z0-9_-]+)\/?$/i.exec(path))) page = <Profile handle={m[1]!.toLowerCase()} tab={query.get('tab')} />
   else if (path === '/data') page = <MyData />
   else if (path === '/library') page = <Library />
   else if (path === '/tree') page = <Archipelago />
@@ -90,7 +90,7 @@ export function App() {
   return (
     <SessionContext.Provider value={session}>
       <AskTopicProvider>
-      <header className={`nav ${/^\/i\//.test(path) ? 'full' : ''}`}>
+      <header className="nav">
         <div className="wrap">
           <Link to="/" className="brand">
             <Logo /> <span>Prolifica</span>

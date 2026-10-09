@@ -112,6 +112,8 @@ const keyOf = (isle: string, version: number): StepKey => `${isle}:${version}`
 interface Feature {
   part: string
   what: string
+  /** taken from another isle (draws_from) rather than made here */
+  from?: { isle: string; title: string; version: number }
   isle: string
   version: number
   at: number
@@ -126,11 +128,33 @@ interface Features {
   family: Map<string, Feature[]>
 }
 
+/** A part and what it does, before it's pinned to a step. */
+type FeatureText = { part?: string; what: string; from?: Feature['from'] }
+
 /** What a step says it changed, plus the parts it took from other isles. */
-function stepParts(v: EvolutionStep): { part: string; what: string }[] {
-  const out = [...(v.changes ?? [])]
-  for (const d of v.draws ?? []) for (const p of d.parts) if (!out.some((o) => o.part === p)) out.push({ part: p, what: d.note ? `from ${d.title}: ${d.note}` : `taken from ${d.title}` })
+function stepParts(v: EvolutionStep): (FeatureText & { part: string })[] {
+  const out: (FeatureText & { part: string })[] = [...(v.changes ?? [])]
+  for (const d of v.draws ?? []) for (const p of d.parts) if (!out.some((o) => o.part === p)) out.push({ part: p, what: d.note ?? '', from: { isle: d.isle, title: d.title, version: d.version } })
   return out
+}
+
+/** A feature's description as plain text (for prompts). */
+const whatText = (f: FeatureText) => (f.from ? `from "${f.from.title}" v${f.from.version}${f.what ? `: ${f.what}` : ''}` : f.what)
+
+/** An isle's name in running text: set apart so it doesn't read as part of the sentence; a link where it can be followed. */
+function IsleName({ id, title, link }: { id: string; title: string; link?: boolean }) {
+  return link ? <Link to={`/i/${id}`} className="isle-name">{title}</Link> : <cite className="isle-name">{title}</cite>
+}
+
+/** What a feature does, with where it came from when it was taken from another isle. */
+function What({ f, hideFrom, hideWhat }: { f: FeatureText; hideFrom?: boolean; hideWhat?: boolean }) {
+  const what = hideWhat ? '' : f.what
+  return (
+    <span className="evo-what">
+      {f.from && !hideFrom && <>from <IsleName id={f.from.isle} title={f.from.title} /> v{f.from.version}{what ? ': ' : ''}</>}
+      {what}
+    </span>
+  )
 }
 
 function featuresOf(evo: Evolution): Features {
@@ -151,7 +175,7 @@ function featuresOf(evo: Evolution): Features {
       const added: Feature[] = []
       const changed: Feature[] = []
       for (const c of stepParts(v)) {
-        const f: Feature = { part: c.part, what: c.what, isle: e.isle.id, version: v.version, at: v.createdAt }
+        const f: Feature = { part: c.part, what: c.what, from: c.from, isle: e.isle.id, version: v.version, at: v.createdAt }
         ;(line.has(c.part) ? changed : added).push(f)
         line.set(c.part, f)
         family.set(c.part, [...(family.get(c.part) ?? []), f])
@@ -263,13 +287,13 @@ function PartTrail({ evo, feats, part, onPick }: { evo: Evolution; feats: Featur
       <ol>
         {steps.map((f) => (
           <li key={keyOf(f.isle, f.version)}>
-            <button className="link-btn" onClick={() => onPick({ isle: f.isle, version: f.version })}>{title(f.isle)} v{f.version}</button>
-            <span className="small"> {f.what}</span>
+            <button className="link-btn isle-name" onClick={() => onPick({ isle: f.isle, version: f.version })}>{title(f.isle)} v{f.version}</button>
+            <span className="small"> <What f={f} /></span>
             <span className="tiny muted"> · {ago(f.at)}</span>
           </li>
         ))}
       </ol>
-      {lacking.length > 0 && <div className="tiny muted">Not in: {lacking.map((e) => e.isle.title).join(', ')}</div>}
+      {lacking.length > 0 && <div className="tiny muted">Not in: {lacking.map((e, i) => <span key={e.isle.id}>{i ? ', ' : ''}<IsleName id={e.isle.id} title={e.isle.title} link /></span>)}</div>}
     </div>
   )
 }
@@ -304,10 +328,10 @@ function StepCard({ evo, feats, e, v, draw }: { evo: Evolution; feats: Features;
   const parent = e.parentId ? evo.isles.find((x) => x.isle.id === e.parentId) : null
   const d = feats.delta.get(keyOf(e.isle.id, v.version))
   const head = draw
-    ? <>{e.isle.title} v{v.version} took from {draw.title} v{draw.version}</>
+    ? <><IsleName id={e.isle.id} title={e.isle.title} /> v{v.version} took from <IsleName id={draw.isle} title={draw.title} /> v{draw.version}</>
     : n > 0
-      ? <>{e.isle.title}: v{e.versions[n - 1]!.version} → v{v.version}</>
-      : <>{e.isle.title}, {relationWords(e)}{parent ? <> from {parent.isle.title}{e.parentVersion ? ` v${e.parentVersion}` : ''}</> : null}</>
+      ? <><IsleName id={e.isle.id} title={e.isle.title} />: v{e.versions[n - 1]!.version} → v{v.version}</>
+      : <><IsleName id={e.isle.id} title={e.isle.title} />, {relationWords(e)}{parent ? <> from <IsleName id={parent.isle.id} title={parent.isle.title} />{e.parentVersion ? ` v${e.parentVersion}` : ''}</> : null}</>
   const changes = draw
     ? (d ? [...d.added, ...d.changed].filter((f) => draw.parts.includes(f.part)) : [])
     : [...(d?.added ?? []), ...(d?.changed ?? [])]
@@ -319,7 +343,8 @@ function StepCard({ evo, feats, e, v, draw }: { evo: Evolution; feats: Features;
       {(draw ? draw.note : v.note) && <p className="evo-hc-note">{draw ? draw.note : v.note}</p>}
       {changes.length > 0 && (
         <ul className="evo-feats">
-          {changes.map((f) => <FeatureRow key={f.part} sign={added.has(f.part) ? '+' : '~'} f={f} />)}
+          {/* on a draw's card, each part's source and note are the card's own, so they aren't repeated */}
+          {changes.map((f) => <FeatureRow key={f.part} sign={added.has(f.part) ? '+' : '~'} f={f} hideFrom={!!draw && f.from?.isle === draw.isle} hideWhat={!!draw && f.what === (draw.note ?? '')} />)}
         </ul>
       )}
       {!draw && (
@@ -330,18 +355,18 @@ function StepCard({ evo, feats, e, v, draw }: { evo: Evolution; feats: Features;
         </div>
       )}
       {!draw && (v.draws?.length ?? 0) > 0 && (
-        <div className="tiny muted" style={{ marginTop: 4 }}>Also took from {v.draws!.map((x) => `${x.title} v${x.version}`).join(', ')}</div>
+        <div className="tiny muted" style={{ marginTop: 4 }}>Also took from {v.draws!.map((x, i) => <span key={x.isle}>{i ? ', ' : ''}<IsleName id={x.isle} title={x.title} /> v{x.version}</span>)}</div>
       )}
     </div>
   )
 }
 
-function FeatureRow({ sign, f, muted }: { sign: '+' | '~' | '·' | '−'; f: Feature; muted?: boolean }) {
+function FeatureRow({ sign, f, muted, hideFrom, hideWhat }: { sign: '+' | '~' | '·' | '−'; f: Feature; muted?: boolean; hideFrom?: boolean; hideWhat?: boolean }) {
   const cls = sign === '+' ? 'add' : sign === '~' ? 'chg' : sign === '−' ? 'del' : ''
   return (
     <li className={muted ? 'muted' : ''}>
       <span className={`evo-sign ${cls}`} aria-hidden="true">{sign}</span>
-      <span className="grow"><code>{f.part}</code> <span className="evo-what">{f.what}</span></span>
+      <span className="grow"><code>{f.part}</code> <What f={f} hideFrom={hideFrom} hideWhat={hideWhat} /></span>
     </li>
   )
 }
@@ -358,7 +383,7 @@ function NodeCard({ feats, e, v }: { feats: Features; e: EvolutionIsle; v: Evolu
   const MAX_MISSING = 6
   return (
     <div className="evo-hc">
-      <b className="evo-hc-h">{e.isle.title} <span className="muted">v{v.version}</span></b>
+      <b className="evo-hc-h"><IsleName id={e.isle.id} title={e.isle.title} /> <span className="muted">v{v.version}</span></b>
       <div className="tiny muted">{ago(v.createdAt)} · {v.version === e.versions.at(-1)!.version ? 'latest · ' : ''}{relationWords(e)}</div>
       {v.note && <p className="evo-hc-note">{v.note}</p>}
       {have.length + missing.length > 0 ? (
@@ -658,7 +683,7 @@ function MissingPanel({ evo, feats, focus, onRing }: { evo: Evolution; feats: Fe
   const prompt =
     `Using the Prolifica connector, read isle ${focus.isle.id} ("${focus.isle.title}", ${url}) with get_isle, including its HTML, and the isles below that have features it's missing, also with get_isle.\n\n` +
     `Bring these features into "${focus.isle.title}":\n` +
-    sources.map((s) => `From ${s.e.isle.id} ("${s.e.isle.title}", v${s.version}):\n${s.items.map((f) => `- ${f.part}: ${f.what}`).join('\n')}`).join('\n\n') +
+    sources.map((s) => `From ${s.e.isle.id} ("${s.e.isle.title}", v${s.version}):\n${s.items.map((f) => `- ${f.part}: ${whatText(f)}`).join('\n')}`).join('\n\n') +
     `\n\n` +
     (mine
       ? `Update it in place with publish_isle (id: "${focus.isle.id}")`
@@ -676,7 +701,7 @@ function MissingPanel({ evo, feats, focus, onRing }: { evo: Evolution; feats: Fe
           <p className="tiny muted" style={{ margin: '2px 0 8px' }}>Features its relatives have that it doesn't. Hover one to see where it is; tick the ones you want.</p>
           {groups.map((g) => (
             <div key={g.e.isle.id} className="evo-missing-g" onMouseEnter={() => onRing(ringOf(g.items))}>
-              <div className="tiny"><b>{g.e.isle.title}</b> <span className="muted">· {relationWords(g.e)} · {who(g.e.isle.owner)}</span></div>
+              <div className="tiny"><IsleName id={g.e.isle.id} title={g.e.isle.title} link /> <span className="muted">· {relationWords(g.e)} · {who(g.e.isle.owner)}</span></div>
               {g.items.map((f) => (
                 <label key={f.part} className="evo-missing-i" onMouseEnter={() => onRing(ringOf([f]))} onMouseLeave={() => onRing(ringOf(g.items))}>
                   <input
@@ -684,7 +709,7 @@ function MissingPanel({ evo, feats, focus, onRing }: { evo: Evolution; feats: Fe
                     checked={!off.has(f.part)}
                     onChange={() => setOff((o) => { const n = new Set(o); n.has(f.part) ? n.delete(f.part) : n.add(f.part); return n })}
                   />
-                  <span className="grow small"><code>{f.part}</code> <span className="evo-what">{f.what}</span> <span className="tiny muted">v{f.version}</span></span>
+                  <span className="grow small"><code>{f.part}</code> <What f={f} /> <span className="tiny muted">v{f.version}</span></span>
                 </label>
               ))}
             </div>
@@ -740,7 +765,7 @@ function EvoCard({ e, evo, pick, onPick }: { e: EvolutionIsle; evo: Evolution; p
             <Link to={`/i/${e.isle.id}`} className="evo-title">{e.isle.title}</Link>
             {e.parentId ? <RelationChip relation={e.isle.relation} /> : <span className="chip">original</span>}
           </div>
-          <div className="tiny muted">{who(e.isle.owner)} · {ago(first.createdAt)}{parent ? <> · from {parent.isle.title}{e.parentVersion ? ` v${e.parentVersion}` : ''}</> : null}</div>
+          <div className="tiny muted">{who(e.isle.owner)} · {ago(first.createdAt)}{parent ? <> · from <IsleName id={parent.isle.id} title={parent.isle.title} link />{e.parentVersion ? ` v${e.parentVersion}` : ''}</> : null}</div>
           <p className={`evo-note ${first.note ? '' : 'muted'} ${!first.note && !e.parentId ? 'desc' : ''}`} title={!first.note && !e.parentId ? (e.isle.description ?? undefined) : undefined}>
             {first.note ?? (e.parentId ? 'No description of what changed.' : (e.isle.description ?? 'The original.'))}
           </p>
@@ -796,7 +821,7 @@ function Compare({ evo, pick }: { evo: Evolution; pick: Pick }) {
   const e = evo.isles.find((x) => x.isle.id === pick.isle)!
   const step = e.versions.find((v) => v.version === pick.version)!
   const prev = before(evo, pick)
-  const label = (x: EvolutionIsle, v: number) => (x === e ? `v${v}` : `${x.isle.title} v${v}`)
+  const label = (x: EvolutionIsle, v: number) => (x === e ? <>v{v}</> : <><IsleName id={x.isle.id} title={x.isle.title} link /> v{v}</>)
   return (
     <div className="card pad" data-pid="evo-compare">
       <div className="tiny muted" style={{ fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase' }}>Compare</div>
@@ -811,7 +836,7 @@ function Compare({ evo, pick }: { evo: Evolution; pick: Pick }) {
       {(step.draws?.length ?? 0) > 0 && (
         <div className="evo-draws small">
           {step.draws!.map((d, i) => (
-            <div key={i}>↳ drew from <Link to={`/i/${d.isle}`}>{d.title}</Link> v{d.version}{d.parts.length ? <> ({d.parts.map((p) => <code key={p}>{p}</code>)})</> : null}{d.note ? `: ${d.note}` : ''}</div>
+            <div key={i}>↳ drew from <IsleName id={d.isle} title={d.title} link /> v{d.version}{d.parts.length ? <> ({d.parts.map((p, i) => <span key={p}>{i ? ', ' : ''}<code>{p}</code></span>)})</> : null}{d.note ? `: ${d.note}` : ''}</div>
           ))}
         </div>
       )}

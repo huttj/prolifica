@@ -1,5 +1,9 @@
-import { api, fmtBytes, who } from './api'
+import { useState } from 'react'
+import { api, who } from './api'
+import { DataPanel } from './DataPages'
+import { DataTree } from './DataTree'
 import { Board } from './Library'
+import { Linkified } from './Markdown'
 import { navigate } from './navigate'
 import { ErrorBox, IsleCard, Link, useAsync, useSession } from './ui'
 
@@ -10,6 +14,8 @@ export function Profile({ handle, tab }: { handle: string; tab: string | null })
   const isles = useAsync(() => (which === 'isles' ? api.isles({ handle, limit: 100 }) : Promise.resolve([])), [handle, which, me?.id])
   const data = useAsync(() => (which === 'data' ? api.data({ handle }) : Promise.resolve([])), [handle, which, me?.id])
   const stars = useAsync(() => (which === 'stars' ? api.library(handle) : Promise.resolve([])), [handle, which, me?.id])
+  // the dataset open in the side panel, as on My data
+  const [openId, setOpenId] = useState<string | null>(null)
 
   if (person.error) return <div className="wrap" style={{ paddingTop: 30 }}><ErrorBox error={person.error} /></div>
   if (!person.data) return <div className="wrap muted" style={{ paddingTop: 30 }}>Loading…</div>
@@ -22,7 +28,7 @@ export function Profile({ handle, tab }: { handle: string; tab: string | null })
         <div className="grow">
           <h1>{p.person.name ?? who(p.person)}</h1>
           <div className="muted">{who(p.person)}</div>
-          {p.person.bio && <p style={{ margin: '8px 0 0', maxWidth: 600 }}>{p.person.bio}</p>}
+          {p.person.bio && <p style={{ margin: '8px 0 0', maxWidth: 600, whiteSpace: 'pre-line' }}><Linkified text={p.person.bio} /></p>}
         </div>
         {me && !p.isMe && (
           <button
@@ -46,20 +52,10 @@ export function Profile({ handle, tab }: { handle: string; tab: string | null })
         {p.following && <span className="small muted">Their comments show in your Following layer.</span>}
       </div>
       {which === 'isles' && (isles.data?.length === 0 ? <div className="empty">No isles yet.</div> : <div className="grid">{isles.data?.map((i) => <IsleCard key={i.id} isle={i} />)}</div>)}
-      {which === 'data' &&
-        (data.data?.length === 0 ? (
-          <div className="empty">No public data.</div>
-        ) : (
-          <div className="card files">
-            {data.data?.map((d) => (
-              <Link key={d.id} to={`/d/${d.id}`} className="file">
-                <span className="kind">{d.kind}</span>
-                <span className="grow ellipsis">{d.path}</span>
-                <span className="tiny muted">{fmtBytes(d.size)}</span>
-              </Link>
-            ))}
-          </div>
-        ))}
+      {which === 'data' && data.data && (
+        <DataTree datasets={data.data} storageKey={`profile:${handle}`} onOpen={(d) => setOpenId(d.id)} selected={openId} empty={p.isMe ? 'No data yet.' : 'No public data.'} />
+      )}
+      {which === 'data' && openId && <DataPanel id={openId} onClose={() => setOpenId(null)} onChanged={data.reload} />}
       {which === 'stars' && (stars.data?.length === 0 ? <div className="empty">Nothing starred yet.</div> : stars.data && <Board items={stars.data} />)}
       <div style={{ height: 60 }} />
     </div>

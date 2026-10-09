@@ -325,7 +325,7 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .ask .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
 .ask-menu { position: fixed; z-index: 70; padding: 4px; min-width: 180px; }
 .header-ask { margin-left: 6px; padding: 5px 10px 5px 8px; gap: 5px; }
-.nav.full .wrap { max-width: none; }
+.nav .wrap { max-width: none; }
 .btn.icon-btn { padding: 7px 9px; }
 .inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
 .ask-pieces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 8px; }
@@ -596,8 +596,11 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .evo-g-band { fill: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
 .evo-lane.focus { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
 .evo-here { color: var(--accent); margin-right: 4px; }
-/* an arrow with a ? badge: the tip shows exactly what you're pointing at (the bare ? cursor doesn't) */
-.evo-g-edge { cursor: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"%3E%3Cpath d="M2 2v19.5l4.9-4.6 3.4 7.6 3.1-1.4-3.3-7.4H17z" fill="%23111" stroke="%23fff" stroke-width="1.5" stroke-linejoin="round"/%3E%3Ccircle cx="23" cy="23" r="7" fill="%23111" stroke="%23fff" stroke-width="1.5"/%3E%3Ctext x="23" y="27" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" font-weight="700" fill="%23fff"%3E%3F%3C/text%3E%3C/svg%3E') 2 2, help; }
+/* an isle's name inside running text */
+.isle-name { font-style: italic; font-weight: 600; color: var(--ink); }
+a.isle-name, button.isle-name { text-decoration: underline dotted; text-underline-offset: 2px; }
+a.isle-name:hover, button.isle-name:hover { text-decoration-style: solid; }
+.evo-g-edge { cursor: default; }
 .evo-g-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; }
 .evo-g-edge:hover .evo-g-ver, .evo-g-edge:hover .evo-g-remix, .evo-g-edge:hover .evo-g-draw { stroke-width: 4; }
 .evo-g-node circle.evo-g-pad { fill: transparent !important; stroke: none !important; }

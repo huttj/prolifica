@@ -12,6 +12,8 @@ export interface UserRow {
   last_login_at: number | null
   /** last time their AI reached /mcp */
   mcp_seen_at?: number | null
+  /** their own storage limit, overriding the default */
+  quota_bytes?: number | null
 }
 
 export function toPerson(u: Pick<UserRow, 'id' | 'handle' | 'name' | 'bio'>): Person {

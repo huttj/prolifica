@@ -112,3 +112,25 @@ export function FoldedMarkdown({ text, lines = 3 }: { text: string; lines?: numb
     </div>
   )
 }
+
+/**
+ * Plain text with its links made clickable: full URLs, bare domains ("joshuahutt.com/notes") and
+ * email addresses. Nothing else is interpreted, so it suits short things people write about themselves.
+ */
+export function Linkified({ text }: { text: string }) {
+  const out: ReactNode[] = []
+  const re = /\b(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"]|[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>()]*[^\s<>().,;:!?'"])?)/gi
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) {
+    const t = m[0]
+    // "e.g." and "v1.2" aren't links: a bare domain needs a real-looking ending
+    if (!/^https?:/i.test(t) && !t.includes('@') && !/\.[a-z]{2,}(\/|$)/i.test(t)) continue
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const href = /^https?:/i.test(t) ? t : t.includes('@') ? `mailto:${t}` : `https://${t}`
+    out.push(<a key={m.index} href={href} target="_blank" rel="noreferrer noopener">{t.replace(/^https?:\/\/(www\.)?/i, '')}</a>)
+    last = m.index + t.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return <>{out}</>
+}

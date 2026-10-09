@@ -83,8 +83,9 @@ export function toMe(env: Env, u: UserRow, usage: number): Me {
   return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, connected: !!u.mcp_seen_at }
 }
 
-/** Bytes a person may keep. Admins (the site's own people) get more. */
-export function quotaFor(env: Env, u: Pick<UserRow, 'email'>) {
+/** Bytes a person may keep: their own limit if they have one; admins (the site's own people) get more. */
+export function quotaFor(env: Env, u: Pick<UserRow, 'email' | 'quota_bytes'>) {
+  if (u.quota_bytes) return u.quota_bytes
   if (isAdminEmail(env, u.email)) return Number(env.ADMIN_QUOTA_BYTES) || 100 * 1024 * 1024
   return Number(env.QUOTA_BYTES) || 5 * 1024 * 1024
 }
