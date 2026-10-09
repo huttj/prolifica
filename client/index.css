@@ -106,7 +106,7 @@ code, pre { font-family: var(--mono); font-size: 13px; }
   .brand span { display: none; }
   .brand { margin-right: 4px; }
   .nav a.link { padding: 6px 7px; }
-  .header-ask { padding: 6px 8px; }
+  .nav .header-ask { padding: 6px 7px; margin-left: 2px; }
 }
 
 /* ---- buttons ---- */
@@ -324,14 +324,16 @@ a.card, a.piece, a.file, a.isle-card { text-decoration: none; color: inherit; }
 .ask .ask-caret { border-radius: 0 10px 10px 0; border-left: 1px solid color-mix(in srgb, var(--accent-ink) 30%, transparent); padding: 7px 8px; }
 .ask .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
 .ask-menu { position: fixed; z-index: 70; padding: 4px; min-width: 180px; }
-.header-ask { margin-right: 4px; }
+.header-ask { margin-left: 6px; padding: 5px 10px 5px 8px; gap: 5px; }
+.nav.full .wrap { max-width: none; }
 .btn.icon-btn { padding: 7px 9px; }
 .inline-icon { width: 14px; height: 14px; vertical-align: -2px; }
 .ask-pieces { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 2px 0 8px; }
 .ask-piece { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
 .ask-piece .link-btn { min-width: 0; color: inherit; }
 .ask-piece .icon { width: 12px; height: 12px; }
-.header-ask .ask-mark, .btn .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
+.btn .ask-mark { display: inline-flex; background: #fff; border-radius: 5px; padding: 2px; }
+.btn.header-ask .ask-mark { background: none; padding: 0; }
 .ask-suggest { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
 .ask-suggest button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--ink-2); cursor: pointer; text-align: left; }
 .ask-suggest button:hover { background: var(--bg-2); }

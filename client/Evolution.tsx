@@ -383,6 +383,58 @@ function NodeCard({ feats, e, v }: { feats: Features; e: EvolutionIsle; v: Evolu
 // ---- the graph: one lane per isle, its versions along it in time, remixes branching off, draws converging ----
 
 type Arrow = 'ver' | 'remix' | 'rebind' | 'draw'
+
+// ---- keeping labels off the lines ----
+
+type Pt = [number, number]
+type Box = [number, number, number, number] // x1, y1, x2, y2
+
+const cubic = (a: Pt, b: Pt, c: Pt, d: Pt, n = 24): Pt[] =>
+  Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n, u = 1 - t
+    return [u * u * u * a[0] + 3 * u * u * t * b[0] + 3 * u * t * t * c[0] + t * t * t * d[0], u * u * u * a[1] + 3 * u * u * t * b[1] + 3 * u * t * t * c[1] + t * t * t * d[1]]
+  })
+const quad = (a: Pt, b: Pt, c: Pt, n = 20): Pt[] =>
+  Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n, u = 1 - t
+    return [u * u * a[0] + 2 * u * t * b[0] + t * t * c[0], u * u * a[1] + 2 * u * t * b[1] + t * t * c[1]]
+  })
+
+/** Where a label's text sits, roughly (SVG text at a baseline; ~6px a character at these sizes). */
+function textBox(x: number, y: number, anchor: 'start' | 'middle' | 'end', text: string): Box {
+  const w = text.length * 6 + 2
+  const x1 = anchor === 'start' ? x : anchor === 'end' ? x - w : x - w / 2
+  return [x1 - 1, y - 9, x1 + w + 1, y + 2]
+}
+const overlaps = (a: Box, b: Box) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+/** Whether a line runs through a box, checked every few pixels along it. */
+const crosses = (b: Box, line: Pt[]) => {
+  const inside = (x: number, y: number) => x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]
+  for (let i = 0; i < line.length; i++) {
+    const [x, y] = line[i]!
+    if (inside(x, y)) return true
+    const next = line[i + 1]
+    if (!next) continue
+    const steps = Math.ceil(Math.hypot(next[0] - x, next[1] - y) / 3)
+    for (let k = 1; k < steps; k++) if (inside(x + ((next[0] - x) * k) / steps, y + ((next[1] - y) * k) / steps)) return true
+  }
+  return false
+}
+
+type Spot = { x: number; y: number; anchor: 'start' | 'middle' | 'end' }
+
+/** The first spot where the text touches no line and no label already placed; else the first. */
+function place(text: string, spots: Spot[], lines: Pt[][], taken: Box[]): Spot {
+  for (const s of spots) {
+    const b = textBox(s.x, s.y, s.anchor, text)
+    if (!lines.some((l) => crosses(b, l)) && !taken.some((t) => overlaps(b, t))) {
+      taken.push(b)
+      return s
+    }
+  }
+  taken.push(textBox(spots[0]!.x, spots[0]!.y, spots[0]!.anchor, text))
+  return spots[0]!
+}
 /** a version dot's radius: lines stop short of it so their arrowheads show */
 const NODE_R = 8
 
@@ -442,7 +494,10 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
   )
 
   const edges: ReactNode[] = []
-  const labels: ReactNode[] = []
+  // every line's course, so labels can be put where nothing runs through them
+  const lines: Pt[][] = []
+  // the labels on lines, placed once every line is known
+  const pending: { key: string; text: string; cls: string; opacity: number; spots: Spot[] }[] = []
   for (const e of evo.isles) {
     const y = Y(e.isle.id)
     e.versions.forEach((v, n) => {
@@ -452,7 +507,11 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
       if (n > 0) {
         const p = e.versions[n - 1]!, px = X(e.isle.id, p.version)
         edges.push(edge(`v${e.isle.id}${v.version}`, `M${px + NODE_R},${y} L${x - NODE_R - 3},${y}`, 'evo-g-ver', dim(on), card, 'ver'))
-        if (v.page && v.page.similarity < 1 && x - px > 40) labels.push(<text key={`l${e.isle.id}${v.version}`} className="evo-g-lbl" x={(px + x) / 2} y={y - 8} textAnchor="middle" opacity={dim(on)}>{pct(v.page)}%</text>)
+        lines.push([[px + NODE_R, y], [x - NODE_R - 3, y]])
+        if (v.page && v.page.similarity < 1 && x - px > 40) {
+          const m = (px + x) / 2
+          pending.push({ key: `l${e.isle.id}${v.version}`, text: `${pct(v.page)}%`, cls: 'evo-g-lbl', opacity: dim(on), spots: [m, m - 14, m + 14, m - 26, m + 26].flatMap((sx) => [{ x: sx, y: y - 8, anchor: 'middle' as const }]).concat([{ x: m, y: y + 15, anchor: 'middle' }]) })
+        }
       } else if (e.parentId && lane.has(e.parentId)) {
         const pv = e.parentVersion ?? evo.isles.find((o) => o.isle.id === e.parentId)!.versions.at(-1)!.version
         const px = X(e.parentId, pv), py = Y(e.parentId)
@@ -460,7 +519,15 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
         const ex = x - NODE_R - 3, bx = ex - 12
         const mid = Math.max(px + STEP * 0.4, bx - STEP * 0.5)
         edges.push(edge(`r${e.isle.id}`, `M${px},${py} C${mid},${py} ${mid},${y} ${bx},${y} L${ex},${y}`, `evo-g-remix ${e.isle.relation ?? ''}`, dim(on), card, e.isle.relation === 'rebind' ? 'rebind' : 'remix'))
-        labels.push(<text key={`rl${e.isle.id}`} className="evo-g-lbl remix" x={x - 14} y={y - 9} textAnchor="end" opacity={dim(on)}>{edgeLabel(v, e.isle.relation)}</text>)
+        lines.push([...cubic([px, py], [mid, py], [mid, y], [bx, y]), [ex, y]])
+        pending.push({
+          key: `rl${e.isle.id}`, text: edgeLabel(v, e.isle.relation), cls: 'evo-g-lbl remix', opacity: dim(on),
+          spots: [
+            { x: x - 14, y: y - 9, anchor: 'end' }, { x: x - 14, y: y + 16, anchor: 'end' },
+            { x: x - 34, y: y - 9, anchor: 'end' }, { x: x - 34, y: y + 16, anchor: 'end' },
+            { x: x + 14, y: y - 9, anchor: 'start' },
+          ],
+        })
       }
       for (const d of v.draws ?? []) {
         if (!d.inFamily || !lane.has(d.isle)) continue
@@ -470,10 +537,27 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
         // runs along a version line, whichever side the source is on
         const ey = y + (sy < y ? -1 : 1) * (NODE_R + 3)
         const lx = sx + Math.sign(x - sx) * NODE_R
+        lines.push(quad([lx, sy], [x, sy], [x, ey]))
         edges.push(edge(`d${e.isle.id}${v.version}${d.isle}`, `M${lx},${sy} Q${x},${sy} ${x},${ey}`, 'evo-g-draw', dim(hot), () => <StepCard evo={evo} feats={feats} e={e} v={v} draw={d} />, 'draw'))
       }
     })
   }
+  // version numbers first (under their dot if it's clear, else beside or above it), then the lines' labels
+  const taken: Box[] = []
+  const verSpot = new Map<string, Spot>()
+  for (const e of evo.isles) for (const v of e.versions) {
+    const x = X(e.isle.id, v.version), y = Y(e.isle.id)
+    const t = `v${v.version}`
+    const s = place(t, ([
+      { x: 0, y: 22, anchor: 'middle' }, { x: 13, y: 19, anchor: 'start' }, { x: -13, y: 19, anchor: 'end' },
+      { x: 0, y: -14, anchor: 'middle' }, { x: 13, y: -10, anchor: 'start' }, { x: -13, y: -10, anchor: 'end' },
+    ] as Spot[]).map((o) => ({ ...o, x: x + o.x, y: y + o.y })), lines, taken)
+    verSpot.set(keyOf(e.isle.id, v.version), { ...s, x: s.x - x, y: s.y - y })
+  }
+  const labels = pending.map((l) => {
+    const s = place(l.text, l.spots, lines, taken)
+    return <text key={l.key} className={l.cls} x={s.x} y={s.y} textAnchor={s.anchor} opacity={l.opacity}>{l.text}</text>
+  })
   const focusLane = lane.get(evo.focusId)
   return (
     <div className="evo-graph">
@@ -508,7 +592,10 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
                   <circle className="evo-g-pad" r={16} />
                   {ringed && <circle className="evo-g-ring" r={14} />}
                   <circle r={on ? 10 : 8} />
-                  <text y={22} textAnchor="middle">v{v.version}</text>
+                  {(() => {
+                    const s = verSpot.get(keyOf(e.isle.id, v.version))!
+                    return <text x={s.x} y={s.y} textAnchor={s.anchor}>v{v.version}</text>
+                  })()}
                 </g>
               )
             }),

@@ -90,7 +90,7 @@ export function App() {
   return (
     <SessionContext.Provider value={session}>
       <AskTopicProvider>
-      <header className="nav">
+      <header className={`nav ${/^\/i\//.test(path) ? 'full' : ''}`}>
         <div className="wrap">
           <Link to="/" className="brand">
             <Logo /> <span>Prolifica</span>
@@ -101,7 +101,6 @@ export function App() {
           {me && nav('/library', 'Library')}
           {me && nav('/data', 'My data', 'hide-sm')}
           <div className="spacer" />
-          <HeaderAsk />
           {me ? (
             <>
               {me.handle && nav(`/@${me.handle}`, `@${me.handle}`, 'hide-sm')}
@@ -114,6 +113,7 @@ export function App() {
               </Link>
             )
           )}
+          <HeaderAsk />
         </div>
       </header>
       {me && !me.handle && path !== '/settings' && <HandlePrompt />}
