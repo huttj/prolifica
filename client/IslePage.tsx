@@ -70,7 +70,15 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
     u.searchParams.set('v', String(viewing.version))
     return u.toString()
   }, [isle.data, viewing])
-  useEffect(() => setReady(false), [frameSrc])
+  // the frame keeps showing the page it had until the new one has loaded: hide it in between, so a new
+  // header never sits over the last isle's page
+  const [painted, setPainted] = useState(false)
+  useEffect(() => {
+    setReady(false)
+    setPainted(false)
+    const t = window.setTimeout(() => setPainted(true), 6000)
+    return () => clearTimeout(t)
+  }, [frameSrc])
   useEffect(() => {
     setViewing(null)
     setAskPieces([])
@@ -123,7 +131,10 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
       if (e.origin !== frameOrigin || e.source !== frame.current?.contentWindow) return
       const m = e.data as { prolifica?: number; t?: string; anchor?: Anchor; snippet?: string; key?: string }
       if (!m?.prolifica) return
-      if (m.t === 'ready') setReady(true)
+      if (m.t === 'ready') {
+        setReady(true)
+        setPainted(true)
+      }
       if (m.t === 'picked' && m.anchor) {
         setPicking(false)
         if (pickFor === 'ask') {
@@ -194,6 +205,8 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   if (isle.error) return <div className="wrap" style={{ paddingTop: 30 }}><ErrorBox error={isle.error} /></div>
   if (!isle.data) return <div className="wrap muted" style={{ paddingTop: 30 }}>Loading…</div>
   const i = isle.data
+  // just navigated to another isle: this one's still showing while the new one loads
+  const stale = i.id !== id
   const page = marks?.tallies.find((t) => t.anchorKey === '')
   const mine = me?.id === i.owner.id
 
@@ -212,7 +225,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   /** Show a marked piece: the isle restores the view it was marked in, then scrolls to it and rings it. */
   const focusEl = (anchor: Anchor | null) => post({ t: 'focus', selector: anchor?.selector ?? null, state: anchor?.state, mode: 'ring' })
   return (
-    <div className="isle-page">
+    <div className={`isle-page ${stale ? 'stale' : ''}`}>
       <div className="isle-bar">
         <div className="grow" style={{ minWidth: 200 }}>
           {i.viewName && <div className="isle-kind">{i.viewName}</div>}
@@ -231,6 +244,11 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
             {i.visibility !== 'public' && (
               <button className="chip" style={{ cursor: mine ? 'pointer' : 'default' }} onClick={() => mine && setSettingsOpen(true)} title={mine ? 'Change who can see it' : undefined}>
                 <Icon name="lock" /> {i.visibility}
+              </button>
+            )}
+            {i.samePage.length > 0 && (
+              <button className="chip" style={{ cursor: 'pointer' }} onClick={() => setTab('family')} title={`Runs the very same page as ${i.samePage.map((x) => x.title).join(', ')}`}>
+                same page as {i.samePage.length} other{i.samePage.length === 1 ? '' : 's'}
               </button>
             )}
             {i.childCount > 0 && (
@@ -292,7 +310,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
       </div>
 
       <div className="isle-body">
-        <div className="isle-frame">
+        <div className={`isle-frame ${painted && !stale ? '' : 'loading'}`}>
           {viewing && !viewing.current && (
             <div className="version-banner">
               <span className="grow ellipsis">
@@ -323,6 +341,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
           <SizedFrame
             frameRef={frame}
             src={frameSrc}
+            onLoad={() => setPainted(true)}
             title={i.title}
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms allow-modals allow-downloads"
             allow="clipboard-write; fullscreen"
@@ -634,6 +653,21 @@ function Family({ isle }: { isle: Isle }) {
         <Icon name="tree" /> See how it evolved
       </Link>
       <ThreadView roots={chain(ancestors, tree)} current={isle.id} />
+      <div>
+        <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>{isle.samePage.length ? 'Same page as' : 'Its page'}</div>
+        {isle.samePage.length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>Its own</p>
+        ) : (
+          <>
+            {isle.samePage.map((x) => (
+              <Link key={x.id} to={`/i/${x.id}`} className="piece">
+                <span className="grow ellipsis small">{x.title}</span>
+                <span className="tiny muted">{who(x.owner)}</span>
+              </Link>
+            ))}
+          </>
+        )}
+      </div>
       {isle.uses.length > 0 && (
         <div>
           <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Borrows from</div>
@@ -716,7 +750,6 @@ function IsleSettings({ isle, onClose, onChanged }: { isle: Isle; onClose: () =>
   return (
     <Modal onClose={onClose}>
       <h2>{isle.visibility === 'private' ? 'Publish to the map' : 'Map settings'}</h2>
-      <p className="small muted" style={{ margin: '0 0 4px' }}>How this isle shows on the map and in Explore.</p>
       <label className="lbl">Who can see it</label>
       <div className="stack" style={{ gap: 6 }}>
         {options.map((o) => (

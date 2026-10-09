@@ -671,6 +671,13 @@ export class Store {
       .prepare(`SELECT e.meta, i.* FROM edges e JOIN isles i ON i.id = e.dst_id WHERE e.src_kind = 'isle' AND e.src_id = ? AND e.rel = 'uses' AND i.deleted_at IS NULL`)
       .bind(id)
       .all<IsleRow & { meta: string | null }>()
+    // other isles running this very page (byte for byte), so people can tell a shared page from an own copy
+    const { results: twinRows } = await this.d1
+      .prepare('SELECT * FROM isles WHERE source_blob = ? AND id != ? AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 30')
+      .bind(row.source_blob, id)
+      .all<IsleRow>()
+    const samePage = []
+    for (const t of twinRows) if (this.canSeeIsle(t)) samePage.push(await this.toSummary(t))
     const uses = []
     for (const u of useRows) {
       if (!this.canSeeIsle(u)) continue
@@ -686,6 +693,7 @@ export class Store {
         parent: parentRow && this.canSeeIsle(parentRow) ? await this.toSummary(parentRow) : null,
         childCount,
         uses,
+        samePage,
       },
     }
   }
@@ -842,7 +850,7 @@ export class Store {
         const draws = v.draws
           .filter((d) => rows.some((r) => r.id === d.isle) || outsideTitle.has(d.isle))
           .map((d) => ({ isle: d.isle, version: d.version, note: d.note, parts: d.parts ?? [], title: rows.find((r) => r.id === d.isle)?.title ?? outsideTitle.get(d.isle)!, inFamily: rows.some((r) => r.id === d.isle) }))
-        steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, data, ...(draws.length ? { draws } : {}), ...(v.changes.length ? { changes: v.changes } : {}) })
+        steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, pageKey: v.source.slice(0, 12), data, ...(draws.length ? { draws } : {}), ...(v.changes.length ? { changes: v.changes } : {}) })
       }
       out.set(r.id, { isle: await this.toSummary(r), parentId: r.parent_id && byId.has(r.parent_id) ? r.parent_id : null, parentVersion, depth: 0, versions: steps })
     }

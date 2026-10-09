@@ -72,11 +72,8 @@ export function EvolutionView({ id }: { id: string }) {
     <div className="evo">
       <h2 className="evo-h">How “{root.isle.title}” evolved</h2>
       <p className="small muted" style={{ margin: '2px 0 10px' }}>
-        {remixes ? `${remixes} remix${remixes === 1 ? '' : 'es'}, ` : ''}{versions} version{versions === 1 ? '' : 's'}.{' '}
-        {mode === 'graph'
-          ? 'Each row is one isle and each dot one of its versions, oldest on the left. Hover a line for what changed, a dot for its features; click a dot to compare it with the step before.'
-          : 'Click a step to compare it with the one before.'}
-        {data.truncated && ' (The family is bigger than this; showing the first part.)'}
+        {remixes ? `${remixes} remix${remixes === 1 ? '' : 'es'}, ` : ''}{versions} version{versions === 1 ? '' : 's'}
+        {data.truncated && ' (showing the first part)'}
       </p>
       <div className="row evo-tools">
         <div className="seg">
@@ -102,6 +99,42 @@ export function EvolutionView({ id }: { id: string }) {
       </div>
     </div>
   )
+}
+
+// ---- pages: which isles run the very same page ----
+
+const PAGE_COLORS = ['#6f8fe0', '#d36aa6', '#d9a03a', '#3fa58a', '#9b6fd6', '#d9694a']
+
+interface PageGroup {
+  key: string
+  letter: string
+  color: string
+  /** isles whose latest version runs this page */
+  isles: EvolutionIsle[]
+}
+
+/** Pages that more than one isle runs now, lettered A, B, … in family order. */
+function pageGroupsOf(evo: Evolution): Map<string, PageGroup> {
+  const by = new Map<string, EvolutionIsle[]>()
+  for (const e of evo.isles) {
+    const k = e.versions.at(-1)!.pageKey
+    by.set(k, [...(by.get(k) ?? []), e])
+  }
+  const out = new Map<string, PageGroup>()
+  for (const [key, isles] of by) {
+    if (isles.length < 2) continue
+    const n = out.size
+    out.set(key, { key, letter: String.fromCharCode(65 + (n % 26)), color: PAGE_COLORS[n % PAGE_COLORS.length]!, isles })
+  }
+  return out
+}
+
+/** Every other step in the family that runs the same page as this one. */
+const samePageSteps = (evo: Evolution, e: EvolutionIsle, v: EvolutionStep) =>
+  evo.isles.flatMap((x) => x.versions.filter((w) => w.pageKey === v.pageKey && !(x === e && w === v)).map((w) => ({ e: x, v: w })))
+
+function PageChip2({ g, title }: { g: PageGroup; title?: string }) {
+  return <span className="evo-page" style={{ '--pg': g.color } as React.CSSProperties} title={title}>page {g.letter}</span>
 }
 
 // ---- features: the parts each line of the family has picked up ----
@@ -223,7 +256,6 @@ function PartPicker({ parts, value, onChange }: { parts: { part: string; n: numb
   }
   return (
     <div className="evo-combo">
-      <span className="tiny muted">Follow a feature</span>
       <div className={`evo-combo-box ${value ? 'set' : ''}`}>
         <input
           ref={input}
@@ -372,7 +404,8 @@ function FeatureRow({ sign, f, muted, hideFrom, hideWhat }: { sign: '+' | '~' | 
 }
 
 /** A version: its note, and its features (new, changed, kept, and the ones its relatives have). */
-function NodeCard({ feats, e, v }: { feats: Features; e: EvolutionIsle; v: EvolutionStep }) {
+function NodeCard({ evo, feats, e, v }: { evo: Evolution; feats: Features; e: EvolutionIsle; v: EvolutionStep }) {
+  const twins = samePageSteps(evo, e, v)
   const k = keyOf(e.isle.id, v.version)
   const d = feats.delta.get(k)
   const have = [...(feats.at.get(k)?.values() ?? [])]
@@ -386,6 +419,11 @@ function NodeCard({ feats, e, v }: { feats: Features; e: EvolutionIsle; v: Evolu
       <b className="evo-hc-h"><IsleName id={e.isle.id} title={e.isle.title} /> <span className="muted">v{v.version}</span></b>
       <div className="tiny muted">{ago(v.createdAt)} · {v.version === e.versions.at(-1)!.version ? 'latest · ' : ''}{relationWords(e)}</div>
       {v.note && <p className="evo-hc-note">{v.note}</p>}
+      <div className="tiny muted" style={{ marginTop: 4 }}>
+        {twins.length
+          ? <>Same page as {twins.slice(0, 4).map((t, i) => <span key={keyOf(t.e.isle.id, t.v.version)}>{i ? ', ' : ''}{t.e === e ? '' : <><IsleName id={t.e.isle.id} title={t.e.isle.title} /> </>}v{t.v.version}</span>)}{twins.length > 4 ? ` and ${twins.length - 4} more` : ''}</>
+          : 'Its own page: no other version runs this one.'}
+      </div>
       {have.length + missing.length > 0 ? (
         <ul className="evo-feats">
           {d?.added.map((f) => <FeatureRow key={f.part} sign="+" f={f} />)}
@@ -584,13 +622,20 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
     return <text key={l.key} className={l.cls} x={s.x} y={s.y} textAnchor={s.anchor} opacity={l.opacity}>{l.text}</text>
   })
   const focusLane = lane.get(evo.focusId)
+  const pages = pageGroupsOf(evo)
   return (
     <div className="evo-graph">
       <div className="evo-lanes" style={{ paddingTop: PAD - 6 - LANE / 2 }}>
         {evo.isles.map((e) => (
           <button key={e.isle.id} className={`evo-lane ${e.isle.id === evo.focusId ? 'focus' : ''}`} style={{ height: LANE, paddingLeft: 8 + Math.min(e.depth, 5) * 10 }} onClick={() => onPick({ isle: e.isle.id, version: e.versions.at(-1)!.version })} title={e.isle.title}>
             <span className="ellipsis evo-lane-t">{e.isle.title}</span>
-            <span className="tiny muted ellipsis">{e.isle.id === evo.focusId ? <b className="evo-here">you're here</b> : null}{relationWords(e)} · {who(e.isle.owner)}</span>
+            <span className="tiny muted ellipsis">
+              {(() => {
+                const g = pages.get(e.versions.at(-1)!.pageKey)
+                return g ? <PageChip2 g={g} title={`Runs the same page as ${g.isles.filter((x) => x !== e).map((x) => x.isle.title).join(', ')}`} /> : null
+              })()}
+              {e.isle.id === evo.focusId ? <b className="evo-here">you're here</b> : null}{relationWords(e)} · {who(e.isle.owner)}
+            </span>
           </button>
         ))}
       </div>
@@ -608,7 +653,7 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
               const hit = part ? touches(v, part) : false
               const last = n === e.versions.length - 1
               const ringed = ring?.has(keyOf(e.isle.id, v.version)) ?? false
-              const card = () => <NodeCard feats={feats} e={e} v={v} />
+              const card = () => <NodeCard evo={evo} feats={feats} e={e} v={v} />
               return (
                 <g key={`n${e.isle.id}${v.version}`} className={`evo-g-node ${on ? 'on' : ''} ${hit ? 'hit' : ''} ${last ? 'last' : ''} ${ringed ? 'want' : ''}`} transform={`translate(${x},${y})`} opacity={(part && !hit) || (ring && !ringed) ? 0.35 : 1}
                   onClick={() => onPick({ isle: e.isle.id, version: v.version })} tabIndex={0} role="button" aria-label={`${e.isle.title} version ${v.version}`}
@@ -818,8 +863,12 @@ function versionUrl(frameUrl: string, v: number, current: number) {
 }
 
 function Compare({ evo, pick }: { evo: Evolution; pick: Pick }) {
+  const { me } = useSession()
   const e = evo.isles.find((x) => x.isle.id === pick.isle)!
   const step = e.versions.find((v) => v.version === pick.version)!
+  const focus = evo.isles.find((x) => x.isle.id === evo.focusId)
+  // the isle you came from is yours and runs a different page: offer to move it onto this one
+  const canAdopt = !!focus && focus !== e && me?.id === focus.isle.owner.id && focus.versions.at(-1)!.pageKey !== step.pageKey
   const prev = before(evo, pick)
   const label = (x: EvolutionIsle, v: number) => (x === e ? <>v{v}</> : <><IsleName id={x.isle.id} title={x.isle.title} link /> v{v}</>)
   return (
@@ -828,6 +877,15 @@ function Compare({ evo, pick }: { evo: Evolution; pick: Pick }) {
       <h2 style={{ margin: '4px 0 2px', fontSize: 18 }}>{e.isle.title} <span className="muted">v{step.version}</span></h2>
       <div className="small muted">{prev ? <>compared with {label(prev.e, prev.version)}{prev.e !== e ? ', the version it was made from' : ''}</> : 'the first version: nothing before it'} · {ago(step.createdAt)}</div>
       {step.note && <p className="evo-note" style={{ marginTop: 10 }}>{step.note}</p>}
+      {canAdopt && (
+        <div className="evo-adopt">
+          <span className="small grow">Run <IsleName id={focus!.isle.id} title={focus!.isle.title} /> on this page, with its own data</span>
+          <AskAiButton
+            label="Use this page with"
+            prompt={adoptPrompt(focus!, e, step.version)}
+          />
+        </div>
+      )}
       {(step.changes?.length ?? 0) > 0 && (
         <ul className="evo-changes">
           {step.changes!.map((c, i) => <li key={i}><code>{c.part}</code> {c.what}</li>)}
@@ -961,3 +1019,15 @@ function PageDiff({ a, b }: { a: { id: string; v: number }; b: { id: string; v: 
   )
 }
 
+
+/** Moving an isle onto another isle's page (the same UI), keeping its own data. */
+function adoptPrompt(focus: EvolutionIsle, from: EvolutionIsle, version: number): string {
+  const url = (id: string) => `${location.origin}/i/${id}`
+  return (
+    `Using the Prolifica connector, update my isle ${focus.isle.id} ("${focus.isle.title}", ${url(focus.isle.id)}) to run the same page as ${from.isle.id} ("${from.isle.title}" v${version}, ${url(from.isle.id)}), keeping my isle's own data.\n\n` +
+    `1. get_isle both (slots, bindings and HTML).\n` +
+    `2. Update mine in place: publish_isle with id: "${focus.isle.id}" and from: "${from.isle.id}", keeping my bindings, with a note saying it moved onto that page and draws_from: [{isle: "${from.isle.id}", version: ${version}, note: "moved onto its page"}].\n` +
+    `3. If my data doesn't fit that page's slots, write fitted copies (derived_from the originals, transform saying how) and bind those; never overwrite the originals.\n` +
+    `4. check_isle mine and fix anything broken. Tell me the link when it's done.`
+  )
+}

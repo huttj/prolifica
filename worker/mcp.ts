@@ -37,7 +37,8 @@ make here is public by default and can be remixed by anyone.
   where it belongs: one folder per subject or collection ("x-threads/bike/"), the raw capture and
   what you derived from it side by side, short lowercase names that say what's inside
   ("thread.json", "analysis.json", not "data2.json"). If the layout has drifted, suggest a tidier
-  one; update_data with a new path moves a file without touching its contents or lineage.
+  one; update_data with a new path moves a file without touching its contents or lineage, and
+  update_data with items moves or re-describes many in one call.
 - A transformation is just new data with derived_from (the inputs) and transform. Write the
   transform as one plain sentence saying what you did; if a prompt did it, add the prompt after a
   blank line (people see the sentence, the prompt is folded away). Keep the original; derive,
@@ -233,8 +234,21 @@ const TOOLS = [
   },
   {
     name: 'update_data',
-    description: 'Rename/move a dataset (to reorganize folders), change its description, transform or provenance (source), or make it public/private, without touching its contents.',
-    inputSchema: obj({ id: s('Dataset id'), path: s('New path'), description: s('New description: one or two short sentences'), transform: s('New transform (derived data): a sentence, then a blank line and the prompt if there was one'), public: { type: 'boolean' }, source: SOURCE_SCHEMA }, ['id']),
+    description:
+      'Rename/move a dataset (to reorganize folders), change its description, transform or provenance (source), or make it public/private, without touching its contents. For many at once (a reorganization), pass items: one call, each item reported on its own.',
+    inputSchema: obj({
+      id: s('Dataset id (for one; or use items)'),
+      path: s('New path'),
+      description: s('New description: one or two short sentences'),
+      transform: s('New transform (derived data): a sentence, then a blank line and the prompt if there was one'),
+      public: { type: 'boolean' },
+      source: SOURCE_SCHEMA,
+      items: {
+        type: 'array',
+        description: 'Up to 200 updates in one call, each {id, path?, description?, transform?, public?, source?}. Applied in order; one failing does not stop the rest.',
+        items: obj({ id: s('Dataset id'), path: s('New path'), description: s('New description'), transform: s('New transform'), public: { type: 'boolean' }, source: SOURCE_SCHEMA }, ['id']),
+      },
+    }),
   },
   {
     name: 'delete_data',
@@ -544,8 +558,23 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     }
 
     case 'update_data': {
-      const d = await store.updateDatasetMeta(String(args.id ?? ''), { path: str(args.path), description: typeof args.description === 'string' ? args.description : undefined, transform: typeof args.transform === 'string' ? args.transform : undefined, public: bool(args.public), source: sourceOf(args.source) })
-      return text({ id: d.id, path: d.path, description: d.description, public: d.public, source: sourceBrief(d.source), url: `${app}/d/${d.id}` })
+      const one = async (a: Record<string, unknown>) => {
+        const d = await store.updateDatasetMeta(String(a.id ?? ''), { path: str(a.path), description: typeof a.description === 'string' ? a.description : undefined, transform: typeof a.transform === 'string' ? a.transform : undefined, public: bool(a.public), source: sourceOf(a.source) })
+        return { id: d.id, path: d.path, description: d.description, public: d.public, source: sourceBrief(d.source), url: `${app}/d/${d.id}` }
+      }
+      if (!Array.isArray(args.items)) return text(await one(args))
+      if (args.items.length > 200) return text('At most 200 items in one call; split it up.', true)
+      const results = []
+      for (const it of args.items as Record<string, unknown>[]) {
+        try {
+          const r = await one(it ?? {})
+          results.push({ ok: true, id: r.id, path: r.path })
+        } catch (e) {
+          results.push({ ok: false, id: it?.id ?? null, error: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      const failed = results.filter((r) => !r.ok).length
+      return text({ updated: results.length - failed, failed, results })
     }
 
     case 'delete_data':

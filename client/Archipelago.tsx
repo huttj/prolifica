@@ -141,6 +141,8 @@ interface World {
   /** what to draw for the kinships: sandbars between families on the same data, lines within a view group not already joined by a route */
   dataLinks: [Isl, Isl][]
   viewLinks: [Isl, Isl][]
+  /** isles running the very same page, joined by land: each to its nearest already joined */
+  pageLinks: [Isl, Isl][]
 }
 
 const CELL = 256
@@ -335,7 +337,24 @@ function buildWorld(chart: SeaChart): World {
       cur = best!
     }
   }
-  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks }
+  // the very same page: land joins them, nearest first, so a shared page reads as one island chain
+  const pageLinks: [Isl, Isl][] = []
+  const onPage = new Map<number, Isl[]>()
+  for (const i of isles) { const l = onPage.get(i.page); if (l) l.push(i); else onPage.set(i.page, [i]) }
+  for (const same of onPage.values()) {
+    if (same.length < 2) continue
+    const joined = [same[0]!]
+    const left = new Set(same.slice(1))
+    while (left.size) {
+      let pair: [Isl, Isl] | null = null
+      let best = Infinity
+      for (const o of left) for (const j of joined) { const d = Math.hypot(o.x - j.x, o.y - j.y); if (d < best) { best = d; pair = [j, o] } }
+      pageLinks.push(pair!)
+      joined.push(pair![1])
+      left.delete(pair![1])
+    }
+  }
+  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks, pageLinks }
 }
 
 /** The isles that run the same page as this one, and those whose data comes from the same original source. */
@@ -722,6 +741,34 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   bar(false)
 
 
+  /**
+   * Isles running the very same page are joined by land: a neck of beach and ground between them, in
+   * their own colours, drawn under the islands so each end disappears into its coast.
+   */
+  const isthmuses = (pairs: [Isl, Isl][]) => {
+    base()
+    ctx.lineCap = 'round'
+    for (const [a, b] of pairs) {
+      const ra = a.r * k, rb = b.r * k
+      if (Math.min(ra, rb) < 2.5) continue
+      const ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y)
+      const neck = Math.min(ra, rb)
+      ctx.beginPath()
+      ctx.moveTo(ax, ay)
+      ctx.lineTo(bx, by)
+      ctx.strokeStyle = t.sand
+      ctx.lineWidth = neck * 0.62
+      ctx.stroke()
+      const g = ctx.createLinearGradient(ax, ay, bx, by)
+      g.addColorStop(0, t.lands[a.tint]!)
+      g.addColorStop(1, t.lands[b.tint]!)
+      ctx.strokeStyle = g
+      ctx.lineWidth = neck * 0.4
+      ctx.stroke()
+    }
+    ctx.lineCap = 'butt'
+  }
+
   ctx.fillStyle = t.deep
   for (const m of shown) {
     const h = heightOf(m.stars)
@@ -732,6 +779,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   ctx.globalAlpha = 1
   ctx.fillStyle = t.sand
   for (const m of shown) blob(m.shape, sx(m.x), sy(m.y), m.r * k * 1.1)
+  isthmuses(w.pageLinks)
   for (const m of shown) {
     ctx.fillStyle = t.lands[m.tint]!
     blob(m.shape, sx(m.x), sy(m.y), m.r * k)
@@ -772,6 +820,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       for (const sh of under) { ctx.globalAlpha = 0.85; blob(sh.shape, sx(sh.x), sy(sh.y), Math.max(sh.rx * k, 4), Math.max(sh.ry * k, 4)) }
       ctx.globalAlpha = 1
     }
+    isthmuses(w.pageLinks.filter(([a, b]) => lit.has(a) && lit.has(b)))
     for (const o of lit) {
       if (o.r * k < 1.6) continue
       ctx.fillStyle = t.sand
@@ -1222,6 +1271,7 @@ function Sea({ world }: { world: World }) {
           </span>
         </div>
         <div className="legend">
+          <span><b className="land-key" />same page</span>
           <span><b className="remix-key" />remixed (a new look)</span>
           <span><b className="bank-key" />more sand, more data</span>
           <span><b className="hill-key" />higher, more stars</span>

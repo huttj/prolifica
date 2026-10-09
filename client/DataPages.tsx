@@ -30,7 +30,7 @@ const REORGANIZE = (origin: string) =>
 1. list_data for all of it (read_data only where you need to see what a file holds).
 2. Propose a layout: one folder per subject or collection, each raw capture and what was derived from it side by side, short lowercase names that say what's inside. Flag duplicates and leftovers, but don't delete anything.
 3. Also fix descriptions (one or two plain sentences: what it is, its shape) and transforms (one sentence saying what was done; if a prompt did it, keep the prompt after a blank line).
-4. Show me the plan as a before → after list first. When I say go, apply it with update_data (moving a path keeps its contents, lineage and every isle bound to it).`
+4. Show me the plan as a before → after list first. When I say go, apply it in one update_data call with items (moving a path keeps its contents, lineage and every isle bound to it).`
 
 export function MyData() {
   const { me, loading, refresh, toast } = useSession()
@@ -86,7 +86,6 @@ export function MyData() {
               className="btn sm"
               button="Reorganize"
               title="Reorganize your data"
-              blurb="Your AI looks over every folder, name, description and transform, shows you a tidier layout, and moves things only once you agree. Contents, lineage and isles stay as they are."
               placeholder="Anything in particular? (optional) e.g. group by site, or keep tweets/ as it is"
               label="Reorganize with"
               optional

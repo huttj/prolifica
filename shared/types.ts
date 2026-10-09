@@ -96,6 +96,8 @@ export interface Isle extends IsleSummary {
   parent: IsleSummary | null
   childCount: number
   uses: { isle: IsleSummary; selector: string | null; label: string | null }[]
+  /** other isles running this very page (the same source, byte for byte) */
+  samePage: IsleSummary[]
 }
 
 export interface Anchor {
@@ -285,6 +287,8 @@ export interface EvolutionStep {
   createdAt: number
   /** compared with the step before: the previous version, or for version 1 the parent as it was then */
   page: PageDelta | null
+  /** which page this version runs: versions (of any isle) with the same key run the very same page */
+  pageKey: string
   data: DataDelta[]
   title?: string
   /** changes this version pulled in from other isles (besides its own past and its parent) */

@@ -64,6 +64,24 @@ const readOpen = (key: string) => {
 
 type Pick = { chosen: Set<string>; setChosen: (ids: string[], on: boolean) => void }
 
+/**
+ * Faint vertical lines down from each open folder above a row (under its caret, or its checkbox when
+ * picking), so a folder's contents visibly hang off it. Drawn as background layers, one per level.
+ */
+/** how far each level of folders is indented */
+const STEP = 22
+
+function guides(depth: number): React.CSSProperties {
+  if (depth < 1) return {}
+  const levels = Array.from({ length: depth }, (_, k) => k)
+  return {
+    backgroundImage: levels.map(() => 'linear-gradient(var(--dt-guide), var(--dt-guide))').join(', '),
+    backgroundSize: levels.map(() => '1px 100%').join(', '),
+    backgroundPosition: levels.map((k) => `${16 + k * STEP}px 0`).join(', '),
+    backgroundRepeat: 'no-repeat',
+  }
+}
+
 export function DataTree({ datasets, storageKey, pick, compact = false, empty, onOpen, selected }: {
   datasets: Dataset[]
   /** where the open folders are remembered */
@@ -121,7 +139,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
     const ticked = pick ? ids.filter((id) => pick.chosen.has(id)).length : 0
     return (
       <div key={f.path}>
-        <div className="dt-folder" style={{ paddingLeft: 10 + depth * 16 }} onClick={() => !filtering && toggle(f.path)}>
+        <div className="dt-folder" style={{ paddingLeft: 10 + depth * STEP, ...guides(depth) }} onClick={() => !filtering && toggle(f.path)}>
           {pick && (
             <input
               type="checkbox"
@@ -152,7 +170,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
   const renderFile = (d: Dataset, folder: string, depth: number) => {
     const name = folder ? d.path.slice(folder.length + 1) : d.path
     const s = siteOfData(d)
-    const pad = { paddingLeft: 10 + depth * 16 }
+    const pad = { paddingLeft: 10 + depth * STEP, ...guides(depth) }
     if (pick)
       return (
         <label key={d.id} className={`umd-item ${pick.chosen.has(d.id) ? 'on' : ''}`} style={pad}>
@@ -171,6 +189,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
         key={d.id}
         href={`/d/${d.id}`}
         className={`file ${selected === d.id ? 'on' : ''}`}
+        style={guides(depth)}
         onClick={(e) => {
           if (onOpen && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
             e.preventDefault()
@@ -178,7 +197,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
           } else onLinkClick(e)
         }}
       >
-        <span style={{ width: depth * 16, flex: 'none', marginRight: -10 }} aria-hidden="true" />
+        <span style={{ width: depth * STEP, flex: 'none', marginRight: -10 }} aria-hidden="true" />
         <span className="kind">{d.kind}</span>
         <span className="grow ellipsis" title={d.path}>{name}</span>
         {d.derivedFrom.length > 0 && <span className="chip accent">derived</span>}

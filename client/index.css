@@ -180,7 +180,10 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .isle-bar .sub a:hover { text-decoration: underline; }
 .isle-body { flex: 1; display: flex; min-height: 0; }
 .isle-frame { flex: 1; position: relative; background: #fff; }
-.isle-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.isle-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; transition: opacity 0.12s; }
+.isle-frame.loading iframe { opacity: 0; }
+.isle-frame.loading::after { content: 'Loading…'; position: absolute; top: 40px; left: 0; right: 0; text-align: center; color: var(--muted); font-size: 14px; }
+.isle-page.stale .isle-bar > * { opacity: 0.35; transition: opacity 0.1s; }
 .panel { width: var(--panel-w, 360px); flex: none; position: relative; border-left: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
 .panel-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; }
 .panel-grip::after { content: ''; position: absolute; left: 3px; top: 50%; width: 2px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--line-2); opacity: 0; transition: opacity .15s; }
@@ -257,6 +260,10 @@ pre.copy { background: var(--bg-2); border: 1px solid var(--line); border-radius
 .dt-bar .field { min-width: 0; }
 .dt-site { flex: 0 1 190px; }
 .dt-list { overflow: hidden; margin-top: 8px; }
+.dt { --dt-guide: color-mix(in srgb, var(--muted) 45%, transparent); }
+/* every row keeps its bottom line (the last file in a folder too); only the list's very last one tucks under the card's edge */
+.dt-list .file:last-child { border-bottom: 1px solid var(--line); }
+.dt-list > :last-child { margin-bottom: -1px; }
 .dt-folder { display: flex; gap: 8px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink-2); user-select: none; }
 .dt-folder:hover { background: var(--bg-2); }
 .dt-folder input { flex: none; accent-color: var(--accent); }
@@ -415,6 +422,7 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .kin-key[aria-pressed='false'] { opacity: 0.5; }
 .kin-key[aria-pressed='false'] .bar-key { filter: grayscale(1); }
 .kin-key.static { cursor: default; }
+.land-key { display: inline-block; flex: none; width: 22px; height: 10px; vertical-align: middle; margin-right: 6px; background: radial-gradient(circle at 4px 5px, var(--land-2) 4px, transparent 4.5px), radial-gradient(circle at 18px 5px, var(--land-2) 4px, transparent 4.5px), linear-gradient(var(--land-2), var(--land-2)) 4px 3px / 14px 4px no-repeat; }
 .shelf-key { display: inline-block; flex: none; width: 20px; height: 10px; border-radius: 6px; background: var(--sea-contour); box-shadow: inset 0 0 0 1px var(--sea-ink); opacity: 0.8; vertical-align: middle; }
 .bar-key { display: inline-block; flex: none; width: 20px; height: 0; border-top: 3px dotted var(--sea-ink); opacity: 0.8; vertical-align: middle; }
 .remix-key { display: inline-block; flex: none; width: 20px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, transparent, var(--sand) 25%, var(--sand) 75%, transparent); box-shadow: 0 0 4px var(--sand); vertical-align: middle; margin-right: 4px; }
@@ -525,7 +533,7 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .evo-data { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12.5px; }
 .evo-data th { text-align: left; color: var(--muted); font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line); }
 .evo-data td { padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
-.evo-diff { margin-top: 8px; max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); }
+.evo-diff { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); }
 .evo-diff > div { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 8px 0 22px; text-indent: -14px; }
 .evo-diff .sign { display: inline-block; width: 14px; text-indent: 0; color: var(--muted); }
 .evo-diff .add { background: color-mix(in srgb, #2f8a47 13%, transparent); }
@@ -534,9 +542,9 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 
 /* evolution as an overlay, with the family graph */
 /* centred when it fits; when it's taller than the window, auto margins collapse and it scrolls from its top */
-.evo-scrim { display: flex; flex-direction: column; padding: 3vh 16px; overflow: auto; }
-.evo-modal { position: relative; width: 100%; max-width: 1240px; margin: auto; padding: 18px 20px 22px; flex: none; }
-.evo-close { position: absolute; top: 10px; right: 10px; }
+.evo-scrim { display: flex; flex-direction: column; padding: 3vh 16px; overflow: hidden; }
+.evo-modal { position: relative; width: 100%; max-width: 1240px; margin: auto; padding: 18px 20px 22px; flex: none; max-height: calc(100dvh - 6vh); overflow: auto; overscroll-behavior: contain; }
+.evo-close { position: sticky; top: 0; float: right; z-index: 5; margin: -8px -10px 0 8px; background: var(--card); }
 .evo-h { font-size: 20px; margin: 0 36px 0 0; }
 .evo-graph { display: grid; grid-template-columns: minmax(150px, 230px) minmax(0, 1fr); border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
 @media (max-width: 640px) { .evo-graph { grid-template-columns: 120px minmax(0, 1fr); } }
@@ -601,6 +609,9 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 a.isle-name, button.isle-name { text-decoration: underline dotted; text-underline-offset: 2px; }
 a.isle-name:hover, button.isle-name:hover { text-decoration-style: solid; }
 .evo-g-edge { cursor: default; }
+/* isles running the very same page share a letter and colour */
+.evo-page { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; line-height: 16px; color: var(--pg); background: color-mix(in srgb, var(--pg) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pg) 45%, transparent); }
+.evo-adopt { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--accent-soft); }
 .evo-g-hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; }
 .evo-g-edge:hover .evo-g-ver, .evo-g-edge:hover .evo-g-remix, .evo-g-edge:hover .evo-g-draw { stroke-width: 4; }
 .evo-g-node circle.evo-g-pad { fill: transparent !important; stroke: none !important; }

@@ -343,7 +343,6 @@ export function HeaderAsk() {
       align="right"
       button={<span className="hide-sm">Ask</span>}
       title={topic ? `Ask your AI about ${topic.about}` : 'Ask your AI'}
-      blurb="It opens beside this page with your ask typed in, and works through the Prolifica connector."
       placeholder={topic ? `What do you want to know or change about ${topic.about}?` : 'e.g. make an isle from my running log, or find isles about city budgets'}
       label="Ask"
       suggestions={topic?.suggestions}
