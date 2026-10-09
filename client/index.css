@@ -549,6 +549,10 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .evo-g-remix { fill: none; stroke: var(--accent-2); stroke-width: 2.4; }
 .evo-g-remix.rebind { stroke: var(--sea-ink); }
 .evo-g-draw { fill: none; stroke: #c27a12; stroke-width: 2; stroke-dasharray: 5 4; }
+.evo-arrow path { fill: var(--muted); }
+.evo-arrow.remix path { fill: var(--accent-2); }
+.evo-arrow.rebind path { fill: var(--sea-ink); }
+.evo-arrow.draw path { fill: #c27a12; }
 .evo-g-lbl { font-size: 10.5px; fill: var(--muted); font-weight: 600; paint-order: stroke; stroke: var(--card); stroke-width: 3px; }
 .evo-g-lbl.remix { fill: var(--ink-2); }
 .evo-g-node { cursor: pointer; outline: none; }

@@ -382,6 +382,23 @@ function NodeCard({ feats, e, v }: { feats: Features; e: EvolutionIsle; v: Evolu
 
 // ---- the graph: one lane per isle, its versions along it in time, remixes branching off, draws converging ----
 
+type Arrow = 'ver' | 'remix' | 'rebind' | 'draw'
+/** a version dot's radius: lines stop short of it so their arrowheads show */
+const NODE_R = 8
+
+/** One arrowhead per kind of line, coloured to match it (sized in px, so a hovered, thicker line keeps it). */
+function ArrowDefs() {
+  return (
+    <defs>
+      {(['ver', 'remix', 'rebind', 'draw'] as Arrow[]).map((a) => (
+        <marker key={a} id={`evo-arrow-${a}`} className={`evo-arrow ${a}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M0,1 L10,5 L0,9 z" />
+        </marker>
+      ))}
+    </defs>
+  )
+}
+
 const LANE = 60
 const STEP = 58
 const PAD = 26
@@ -416,10 +433,10 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
   }
   const hide = () => setHover(null)
 
-  /** A line with a wide invisible twin, so it's easy to hover. */
-  const edge = (key: string, d: string, cls: string, opacity: number, body: () => ReactNode) => (
+  /** A line with a wide invisible twin, so it's easy to hover, and an arrowhead where it arrives. */
+  const edge = (key: string, d: string, cls: string, opacity: number, body: () => ReactNode, arrow: Arrow) => (
     <g key={key} className="evo-g-edge" opacity={opacity} onMouseEnter={show(body)} onMouseMove={show(body)} onMouseLeave={hide}>
-      <path className={cls} d={d} />
+      <path className={cls} d={d} markerEnd={`url(#evo-arrow-${arrow})`} />
       <path className="evo-g-hit" d={d} />
     </g>
   )
@@ -434,13 +451,13 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
       const card = () => <StepCard evo={evo} feats={feats} e={e} v={v} />
       if (n > 0) {
         const p = e.versions[n - 1]!, px = X(e.isle.id, p.version)
-        edges.push(edge(`v${e.isle.id}${v.version}`, `M${px},${y} L${x},${y}`, 'evo-g-ver', dim(on), card))
+        edges.push(edge(`v${e.isle.id}${v.version}`, `M${px + NODE_R},${y} L${x - NODE_R - 3},${y}`, 'evo-g-ver', dim(on), card, 'ver'))
         if (v.page && v.page.similarity < 1 && x - px > 40) labels.push(<text key={`l${e.isle.id}${v.version}`} className="evo-g-lbl" x={(px + x) / 2} y={y - 8} textAnchor="middle" opacity={dim(on)}>{pct(v.page)}%</text>)
       } else if (e.parentId && lane.has(e.parentId)) {
         const pv = e.parentVersion ?? evo.isles.find((o) => o.isle.id === e.parentId)!.versions.at(-1)!.version
         const px = X(e.parentId, pv), py = Y(e.parentId)
         const mid = Math.max(px + STEP * 0.45, x - STEP * 0.55)
-        edges.push(edge(`r${e.isle.id}`, `M${px},${py} C${mid},${py} ${mid},${y} ${x - 10},${y}`, `evo-g-remix ${e.isle.relation ?? ''}`, dim(on), card))
+        edges.push(edge(`r${e.isle.id}`, `M${px},${py} C${mid},${py} ${mid},${y} ${x - NODE_R - 3},${y}`, `evo-g-remix ${e.isle.relation ?? ''}`, dim(on), card, e.isle.relation === 'rebind' ? 'rebind' : 'remix'))
         labels.push(<text key={`rl${e.isle.id}`} className="evo-g-lbl remix" x={x - 14} y={y - 9} textAnchor="end" opacity={dim(on)}>{edgeLabel(v, e.isle.relation)}</text>)
       }
       for (const d of v.draws ?? []) {
@@ -448,7 +465,10 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
         const sx = X(d.isle, d.version), sy = Y(d.isle)
         const hot = !part || d.parts.includes(part)
         const c1 = sx + (x - sx) * 0.5
-        edges.push(edge(`d${e.isle.id}${v.version}${d.isle}`, `M${sx},${sy} C${c1},${sy} ${c1},${y} ${x},${y}`, 'evo-g-draw', dim(hot), () => <StepCard evo={evo} feats={feats} e={e} v={v} draw={d} />))
+        // arrives at a slant from above or below, so its arrowhead doesn't sit on the version line's
+        const side = sy < y ? -1 : 1
+        const ex = x - NODE_R * 0.75, ey = y + side * NODE_R * 0.75
+        edges.push(edge(`d${e.isle.id}${v.version}${d.isle}`, `M${sx},${sy} C${c1},${sy} ${ex - 16},${ey + side * 16} ${ex},${ey}`, 'evo-g-draw', dim(hot), () => <StepCard evo={evo} feats={feats} e={e} v={v} draw={d} />, 'draw'))
       }
     })
   }
@@ -465,6 +485,7 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
       </div>
       <div className="evo-canvas" ref={scroller}>
         <svg width={W} height={H} role="img" aria-label="Family graph">
+          <ArrowDefs />
           {focusLane !== undefined && <rect className="evo-g-band" x={0} y={Y(evo.focusId) - LANE / 2} width={W} height={LANE} />}
           {evo.isles.map((e) => <line key={`lane${e.isle.id}`} className="evo-g-lane" x1={0} x2={W} y1={Y(e.isle.id)} y2={Y(e.isle.id)} />)}
           {edges}
@@ -500,10 +521,10 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
 function GraphLegend() {
   return (
     <div className="evo-legend tiny muted" aria-label="Legend">
-      <span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" className="evo-g-ver" /></svg> a new version</span>
-      <span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" className="evo-g-remix" /></svg> remixed or restyled from</span>
-      <span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" className="evo-g-remix rebind" /></svg> same page, new data</span>
-      <span><svg width="26" height="8"><line x1="1" y1="4" x2="25" y2="4" className="evo-g-draw" /></svg> took parts from another isle</span>
+      <span><svg width="28" height="10"><line x1="1" y1="5" x2="26" y2="5" className="evo-g-ver" markerEnd="url(#evo-arrow-ver)" /></svg> a new version</span>
+      <span><svg width="28" height="10"><line x1="1" y1="5" x2="26" y2="5" className="evo-g-remix" markerEnd="url(#evo-arrow-remix)" /></svg> remixed or restyled from</span>
+      <span><svg width="28" height="10"><line x1="1" y1="5" x2="26" y2="5" className="evo-g-remix rebind" markerEnd="url(#evo-arrow-rebind)" /></svg> same page, new data</span>
+      <span><svg width="28" height="10"><line x1="1" y1="5" x2="26" y2="5" className="evo-g-draw" markerEnd="url(#evo-arrow-draw)" /></svg> took parts from another isle</span>
       <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" className="evo-k-dot" /></svg> a version</span>
       <span><svg width="12" height="12"><circle cx="6" cy="6" r="4.5" className="evo-k-dot last" /></svg> latest</span>
       <span><i className="evo-k-band" /> the isle you came from</span>
