@@ -632,6 +632,20 @@ a.isle-name:hover, button.isle-name:hover { text-decoration-style: solid; }
 .evo-what { color: var(--ink-2); }
 .evo-below { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 14px; align-items: start; margin-top: 14px; }
 @media (max-width: 860px) { .evo-below { grid-template-columns: minmax(0, 1fr); } }
+/* wide: the overlay never scrolls; the graph stays put and the two panels below it each scroll in what's left */
+@media (min-width: 861px) {
+  .evo-modal { display: flex; flex-direction: column; overflow: hidden; }
+  .evo-close { position: absolute; top: 10px; right: 10px; float: none; margin: 0; }
+  .evo { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .evo > * { flex: none; }
+  .evo > .evo-line { flex: 0 1 auto; min-height: 120px; overflow: auto; }
+  .evo > .evo-below { flex: 1 1 auto; min-height: 160px; grid-template-rows: minmax(0, 1fr); }
+  .evo-below > * { max-height: 100%; overflow: auto; overscroll-behavior: contain; border-radius: var(--radius); }
+}
+/* narrow: it scrolls as one, with its title and close button pinned */
+@media (max-width: 860px) {
+  .evo-h { position: sticky; top: -18px; z-index: 4; background: var(--card); margin: -18px -20px 0; padding: 14px 52px 8px 20px; }
+}
 .evo-missing-g { padding: 6px 0; border-top: 1px solid var(--line); }
 .evo-missing-i { display: flex; gap: 8px; align-items: baseline; padding: 4px 2px; border-radius: 6px; cursor: pointer; }
 .evo-missing-i:hover { background: var(--bg-2); }
