@@ -123,6 +123,8 @@ interface Fam {
   x: number
   y: number
   R: number
+  /** isles running the very same page, joined by land: each to its nearest already joined */
+  land: [Isl, Isl][]
 }
 
 interface World {
@@ -245,7 +247,7 @@ function buildWorld(chart: SeaChart): World {
     const root = members[0]!
     const inGroup = new Set(members)
     // the group is named for its format (what kind of page), the isles for their content
-    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0 }
+    const fam: Fam = { name: viewName(members), root, members, shoals: [], x: 0, y: 0, R: 0, land: [] }
     for (const m of members) m.label = m.short ?? shortOf(fam.name ? detailOf(m.title, fam.name) : m.title)
     for (const m of members) { m.fam = fam; m.lk = []; m.ld = 0 }
     for (const m of members) if (m !== root) (m.parent && inGroup.has(m.parent) ? m.parent : root).lk.push(m)
@@ -337,24 +339,7 @@ function buildWorld(chart: SeaChart): World {
       cur = best!
     }
   }
-  // the very same page: land joins them, nearest first, so a shared page reads as one island chain
-  const pageLinks: [Isl, Isl][] = []
-  const onPage = new Map<number, Isl[]>()
-  for (const i of isles) { const l = onPage.get(i.page); if (l) l.push(i); else onPage.set(i.page, [i]) }
-  for (const same of onPage.values()) {
-    if (same.length < 2) continue
-    const joined = [same[0]!]
-    const left = new Set(same.slice(1))
-    while (left.size) {
-      let pair: [Isl, Isl] | null = null
-      let best = Infinity
-      for (const o of left) for (const j of joined) { const d = Math.hypot(o.x - j.x, o.y - j.y); if (d < best) { best = d; pair = [j, o] } }
-      pageLinks.push(pair!)
-      joined.push(pair![1])
-      left.delete(pair![1])
-    }
-  }
-  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks, pageLinks }
+  return { isles, byId, fams, shoals: shoals.filter((s) => s.users.length), shoalAt: shoals.map((s) => (s.users.length ? s : undefined)), grid, bounds, views, bySource, dataLinks, viewLinks, pageLinks: fams.flatMap((f) => f.land) }
 }
 
 /** The isles that run the same page as this one, and those whose data comes from the same original source. */
@@ -476,31 +461,57 @@ function layoutFamily(f: Fam) {
   const start = rand() * Math.PI * 2
   place(f.root, start, start + Math.PI * 2)
 
-  // nudge apart anything that still overlaps (small families only; big ones are already spread)
+  // the very same page: land joins them, nearest first, so a shared page reads as one island chain
+  const onPage = new Map<number, Isl[]>()
+  for (const m of f.members) { const l = onPage.get(m.page); if (l) l.push(m); else onPage.set(m.page, [m]) }
+  for (const same of onPage.values()) {
+    if (same.length < 2) continue
+    const joined = [same[0]!]
+    const left = new Set(same.slice(1))
+    while (left.size) {
+      let pair: [Isl, Isl] | null = null
+      let best = Infinity
+      for (const o of left) for (const j of joined) { const d = Math.hypot(o.x - j.x, o.y - j.y); if (d < best) { best = d; pair = [j, o] } }
+      f.land.push(pair!)
+      joined.push(pair![1])
+      left.delete(pair![1])
+    }
+  }
+
+  // joined isles are pulled in until their coasts meet (some overlap a little, some keep a short neck);
+  // everything else is nudged apart (small families only; big ones are already spread)
   if (f.members.length > 1 && f.members.length <= 400) {
-    for (let it = 0; it < 24; it++) {
+    const tied = new Map<Isl, Set<Isl>>()
+    for (const [a, b] of f.land) { (tied.get(a) ?? tied.set(a, new Set()).get(a)!).add(b); (tied.get(b) ?? tied.set(b, new Set()).get(b)!).add(a) }
+    const reach = f.land.map(([a, b]) => (a.r + b.r) * (0.8 + (((a.seed ^ b.seed) >>> 3) % 100) / 100 * 0.14))
+    const move = (m: Isl, dx: number, dy: number) => { if (m !== f.root) { m.x += dx; m.y += dy } }
+    for (let it = 0; it < 60; it++) {
       let moved = false
+      f.land.forEach(([a, b], n) => {
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const d = Math.hypot(dx, dy) || 0.01
+        const off = d - reach[n]!
+        if (Math.abs(off) < 0.5) return
+        moved = true
+        const share = (a === f.root || b === f.root ? 1 : 0.5) * off * 0.5
+        move(a, (dx / d) * share, (dy / d) * share)
+        move(b, (-dx / d) * share, (-dy / d) * share)
+      })
       for (let i = 0; i < f.members.length; i++)
         for (let j = i + 1; j < f.members.length; j++) {
           const p = f.members[i]!
           const q = f.members[j]!
+          if (tied.get(p)?.has(q)) continue
           const dx = q.x - p.x
           const dy = q.y - p.y
           const d = Math.hypot(dx, dy) || 0.01
           const need = p.r + q.r + 16
           if (d >= need) continue
           moved = true
-          const push = (need - d) / 2
-          const ux = dx / d
-          const uy = dy / d
-          if (p !== f.root) {
-            p.x -= ux * push
-            p.y -= uy * push
-          }
-          if (q !== f.root) {
-            q.x += ux * push
-            q.y += uy * push
-          }
+          const push = ((need - d) / 2) * (p === f.root || q === f.root ? 2 : 1)
+          move(p, (-dx / d) * push, (-dy / d) * push)
+          move(q, (dx / d) * push, (dy / d) * push)
         }
       if (!moved) break
     }
@@ -742,31 +753,56 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
 
 
   /**
-   * Isles running the very same page are joined by land: a neck of beach and ground between them, in
-   * their own colours, drawn under the islands so each end disappears into its coast.
+   * Isles running the very same page are joined by land: their coasts meet, and the ground runs on
+   * between them in a neck that pinches in the middle, beach under ground, each in its own colours.
+   * Drawn under the islands so each end disappears into its coast.
    */
   const isthmuses = (pairs: [Isl, Isl][]) => {
     base()
-    ctx.lineCap = 'round'
     for (const [a, b] of pairs) {
       const ra = a.r * k, rb = b.r * k
       if (Math.min(ra, rb) < 2.5) continue
       const ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y)
-      const neck = Math.min(ra, rb)
-      ctx.beginPath()
-      ctx.moveTo(ax, ay)
-      ctx.lineTo(bx, by)
-      ctx.strokeStyle = t.sand
-      ctx.lineWidth = neck * 0.62
-      ctx.stroke()
+      const d = Math.hypot(bx - ax, by - ay)
+      if (d < 1) continue
+      const ux = (bx - ax) / d, uy = (by - ay) / d
+      const r = rng(a.seed ^ b.seed)
+      const small = Math.min(ra, rb)
+      // where the shores meet, a little off the middle of the gap and off the line between them
+      const at = ra + (d - ra - rb) * (0.3 + r() * 0.4)
+      const mx = ax + ux * at + -uy * (r() - 0.5) * small * 0.3
+      const my = ay + uy * at + ux * (r() - 0.5) * small * 0.3
+      const waist = [small * (0.38 + r() * 0.16), small * (0.38 + r() * 0.16)]
+      const spread = [0.75 + r() * 0.3, 0.75 + r() * 0.3]
+      const neck = (grow: number) => {
+        ctx.beginPath()
+        for (const side of [1, -1]) {
+          const n = side === 1 ? 0 : 1
+          // each shore leaves one island well inside its coast and curves in to the waist, then out to the other
+          const ex = (cx: number, cy: number, rad: number, dir: number) => {
+            const ang = Math.atan2(uy * dir, ux * dir) + side * dir * spread[n]!
+            return [cx + Math.cos(ang) * rad * 0.72 * grow, cy + Math.sin(ang) * rad * 0.72 * grow] as const
+          }
+          const [px, py] = side === 1 ? ex(ax, ay, ra, 1) : ex(bx, by, rb, -1)
+          const [qx, qy] = side === 1 ? ex(bx, by, rb, -1) : ex(ax, ay, ra, 1)
+          // a quadratic's middle sits halfway between its control point and its ends' midpoint: aim the middle at the waist
+          const w = waist[n]! + small * (grow - 1)
+          const wx = mx + -uy * side * w, wy = my + ux * side * w
+          if (side === 1) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+          ctx.quadraticCurveTo(2 * wx - (px + qx) / 2, 2 * wy - (py + qy) / 2, qx, qy)
+        }
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.fillStyle = t.sand
+      neck(1.1)
       const g = ctx.createLinearGradient(ax, ay, bx, by)
-      g.addColorStop(0, t.lands[a.tint]!)
-      g.addColorStop(1, t.lands[b.tint]!)
-      ctx.strokeStyle = g
-      ctx.lineWidth = neck * 0.4
-      ctx.stroke()
+      g.addColorStop(Math.min(0.49, ra / d), t.lands[a.tint]!)
+      g.addColorStop(Math.max(0.51, 1 - rb / d), t.lands[b.tint]!)
+      ctx.fillStyle = g
+      neck(1)
     }
-    ctx.lineCap = 'butt'
   }
 
   ctx.fillStyle = t.deep
@@ -860,13 +896,21 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     base()
   }
 
-  // labels, most-starred first, never on top of each other
+  // labels, most-starred first, never on top of each other: under the island, or wherever there's open
+  // water when land runs on under it, or on the island itself when it's ringed by land
   const taken: [number, number, number, number][] = []
+  const clear = (a: number, b: number, c: number, d: number) => !taken.some(([p, q, r, s]) => a < r && c > p && b < s && d > q)
   const free = (a: number, b: number, c: number, d: number) => {
-    for (const [p, q, r, s] of taken) if (a < r && c > p && b < s && d > q) return false
+    if (!clear(a, b, c, d)) return false
     taken.push([a, b, c, d])
     return true
   }
+  const onLand = (m: Isl, a: number, b: number, c: number, d: number) =>
+    shown.some((o) => {
+      if (o === m || o.r * k < 6) return false
+      const ox = sx(o.x), oy = sy(o.y)
+      return Math.hypot(ox - Math.max(a, Math.min(c, ox)), oy - Math.max(b, Math.min(d, oy))) < o.r * k * 0.95
+    })
   const cands = shown
     .filter((m) => m.r * k >= (m.kids.length ? 6 : 9))
     .sort((a, b) => b.stars - a.stars || b.r - a.r)
@@ -877,17 +921,30 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
   for (const m of cands) {
     const r = m.r * k
     ctx.font = `600 12px ${t.font}`
-    // titles wrap under the island; more lines as you get closer
+    // titles wrap beside the island; more lines as you get closer
     const lines = m.label ? wrapText(ctx, m.label, Math.max(140, Math.min(220, r * 2.4)), 2) : []
-    const x = sx(m.x)
-    const y = sy(m.y) + r * 1.12 + 13
+    const cx = sx(m.x), cy = sy(m.y)
     const sub = r >= 20 || !lines.length ? `${m.by}${m.stars ? `  ★ ${m.stars}` : ''}` : ''
     ctx.font = `500 11px ${t.font}`
     const subW = sub ? ctx.measureText(sub).width : 0
     ctx.font = `600 12px ${t.font}`
     const tw = Math.max(subW, ...lines.map((l) => ctx.measureText(l).width))
-    const subY = lines.length ? y + (lines.length - 1) * 14 + 14 : y
-    if (!free(x - tw / 2 - 3, y - 12, x + tw / 2 + 3, (sub ? subY : subY - 14) + 4)) continue
+    // the block's height, from the first line's top to under its last
+    const bh = (lines.length ? lines.length * 14 : 0) + (sub ? 14 : 0) + 2
+    const reach = r * 1.12
+    const spots: [number, number][] = [
+      [cx, cy + reach + 1],
+      [cx, cy - reach - bh - 2],
+      [cx + reach + 4 + tw / 2, cy - bh / 2],
+      [cx - reach - 4 - tw / 2, cy - bh / 2],
+    ]
+    const box = ([x, top]: [number, number]) => [x - tw / 2 - 3, top, x + tw / 2 + 3, top + bh + 2] as const
+    const pick = spots.find((p) => { const [a, b, c, d] = box(p); return clear(a, b, c, d) && !onLand(m, a, b, c, d) })
+      ?? (r * 2 > tw * 0.8 ? ([cx, cy - bh / 2] as [number, number]) : spots[0]!)
+    const [x, top] = pick
+    if (!free(...box(pick))) continue
+    const y = top + 12
+    const subY = y + lines.length * 14
     ctx.font = `600 12px ${t.font}`
     ctx.globalAlpha = lit.size && !lit.has(m) ? 0.35 : 1
     ctx.strokeStyle = t.deep
