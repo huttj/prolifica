@@ -456,19 +456,21 @@ function EvoGraph({ evo, feats, pick, onPick, part, ring }: { evo: Evolution; fe
       } else if (e.parentId && lane.has(e.parentId)) {
         const pv = e.parentVersion ?? evo.isles.find((o) => o.isle.id === e.parentId)!.versions.at(-1)!.version
         const px = X(e.parentId, pv), py = Y(e.parentId)
-        const mid = Math.max(px + STEP * 0.45, x - STEP * 0.55)
-        edges.push(edge(`r${e.isle.id}`, `M${px},${py} C${mid},${py} ${mid},${y} ${x - NODE_R - 3},${y}`, `evo-g-remix ${e.isle.relation ?? ''}`, dim(on), card, e.isle.relation === 'rebind' ? 'rebind' : 'remix'))
+        // bends early, then runs straight into the dot, so the arrowhead lines up with the line
+        const ex = x - NODE_R - 3, bx = ex - 12
+        const mid = Math.max(px + STEP * 0.4, bx - STEP * 0.5)
+        edges.push(edge(`r${e.isle.id}`, `M${px},${py} C${mid},${py} ${mid},${y} ${bx},${y} L${ex},${y}`, `evo-g-remix ${e.isle.relation ?? ''}`, dim(on), card, e.isle.relation === 'rebind' ? 'rebind' : 'remix'))
         labels.push(<text key={`rl${e.isle.id}`} className="evo-g-lbl remix" x={x - 14} y={y - 9} textAnchor="end" opacity={dim(on)}>{edgeLabel(v, e.isle.relation)}</text>)
       }
       for (const d of v.draws ?? []) {
         if (!d.inFamily || !lane.has(d.isle)) continue
         const sx = X(d.isle, d.version), sy = Y(d.isle)
         const hot = !part || d.parts.includes(part)
-        const c1 = sx + (x - sx) * 0.5
-        // arrives at a slant from above or below, so its arrowhead doesn't sit on the version line's
-        const side = sy < y ? -1 : 1
-        const ex = x - NODE_R * 0.75, ey = y + side * NODE_R * 0.75
-        edges.push(edge(`d${e.isle.id}${v.version}${d.isle}`, `M${sx},${sy} C${c1},${sy} ${ex - 16},${ey + side * 16} ${ex},${ey}`, 'evo-g-draw', dim(hot), () => <StepCard evo={evo} feats={feats} e={e} v={v} draw={d} />, 'draw'))
+        // leaves its source sideways and drops straight into the dot from above or below, so it never
+        // runs along a version line, whichever side the source is on
+        const ey = y + (sy < y ? -1 : 1) * (NODE_R + 3)
+        const lx = sx + Math.sign(x - sx) * NODE_R
+        edges.push(edge(`d${e.isle.id}${v.version}${d.isle}`, `M${lx},${sy} Q${x},${sy} ${x},${ey}`, 'evo-g-draw', dim(hot), () => <StepCard evo={evo} feats={feats} e={e} v={v} draw={d} />, 'draw'))
       }
     })
   }
