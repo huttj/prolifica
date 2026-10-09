@@ -204,10 +204,12 @@ export function AskPopover(props: {
   optional?: boolean
   /** ready-made asks, one click to fill the box */
   suggestions?: string[]
-  /** pieces of the page the ask is about (an isle's elements) */
+  /** pieces of the page the ask is about (an isle's elements, or anything on an app page) */
   pieces?: AskPieces
+  /** other ways in, beside the Ask button */
+  actions?: ReactNode
 }) {
-  const { title, blurb, placeholder, label, prompt, onClose, children, optional, suggestions, pieces } = props
+  const { title, blurb, placeholder, label, prompt, onClose, children, optional, suggestions, pieces, actions } = props
   const picking = !!pieces?.picking
   const [want, setWant] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -228,8 +230,8 @@ export function AskPopover(props: {
   }, [onClose, picking])
   return (
     <div className="popover card" ref={ref} role="dialog" style={picking ? { display: 'none' } : undefined}>
-      <b>{title}</b>
-      {blurb && <p className="tiny muted" style={{ margin: '2px 0 8px' }}>{blurb}</p>}
+      <b className="popover-title">{title}</b>
+      {blurb && <p className="tiny muted" style={{ margin: '-4px 0 8px' }}>{blurb}</p>}
       {pieces && (
         <div className="ask-pieces">
           {pieces.list.map((a, k) => (
@@ -239,7 +241,7 @@ export function AskPopover(props: {
             </span>
           ))}
           <button className="btn sm" onClick={pieces.start} title="Point at a part of the page this is about">
-            <Icon name="pick" /> {pieces.list.length ? 'Pick another' : 'Pick a piece'}
+            <Icon name="pick" /> {pieces.list.length ? 'Pick another' : (pieces.label ?? 'Pick a piece')}
           </button>
         </div>
       )}
@@ -261,6 +263,7 @@ export function AskPopover(props: {
             onClose()
           }}
         />
+        {actions}
       </div>
       {children}
     </div>
@@ -305,6 +308,8 @@ export interface AskPieces {
   clear: () => void
   /** ring it in the isle */
   focus: (a: Anchor) => void
+  /** what the pick button says before anything's picked */
+  label?: string
 }
 
 /** What the header's Ask button knows about the page you're on. */
@@ -315,6 +320,8 @@ export interface AskTopic {
   context: string
   suggestions?: string[]
   pieces?: AskPieces
+  /** an isle: open "same look, my data" */
+  useData?: () => void
 }
 
 type TopicSlot = { topic: AskTopic | null; set: (t: AskTopic | null) => void }
@@ -336,6 +343,8 @@ export function useAskTopic(topic: AskTopic | null) {
 /** The header's Ask: one steady way to hand anything on the site to your AI. */
 export function HeaderAsk() {
   const { topic } = useContext(AskTopicContext)
+  const page = usePagePieces()
+  const pieces = topic?.pieces ?? page
   const general = `Using the Prolifica connector (${location.origin}/mcp), act for me on Prolifica: my data, my isles and the public archipelago. Read the guide tool first if you haven't.`
   return (
     <AskPopoverButton
@@ -346,11 +355,115 @@ export function HeaderAsk() {
       placeholder={topic ? `What do you want to know or change about ${topic.about}?` : 'e.g. make an isle from my running log, or find isles about city budgets'}
       label="Ask"
       suggestions={topic?.suggestions}
-      pieces={topic?.pieces}
-      prompt={(want) => `${topic?.context ?? general}${piecesText(topic?.pieces?.list ?? [])}\n\n${want}`}
+      pieces={pieces}
+      actions={
+        topic?.useData && (
+          <button className="btn" onClick={topic.useData}>
+            <Icon name="data" /> Use your own data
+          </button>
+        )
+      }
+      prompt={(want) =>
+        `${topic?.context ?? general}${topic?.pieces ? piecesText(pieces.list) : pageText(pieces.list)}\n\n${want}`
+      }
     />
   )
 }
+
+/**
+ * Picking things on an app page (not an isle) for the header's Ask: hover rings the nearest sensible
+ * thing (a card, a link, a row, a heading), a click takes it, Esc stops. Forgotten when you change page.
+ */
+function usePagePieces(): AskPieces {
+  const [held, setHeld] = useState<{ path: string; list: Anchor[] }>({ path: '', list: [] })
+  const [picking, setPicking] = useState(false)
+  const list = held.path === location.pathname ? held.list : []
+  useEffect(() => {
+    if (!picking) return
+    const ring = document.createElement('div')
+    ring.className = 'page-pick-ring'
+    document.body.appendChild(ring)
+    document.body.classList.add('page-picking')
+    const at = (e: Event) => {
+      const el = e.target as Element
+      if (!(el instanceof Element) || el.closest('header.nav, .popover, .page-pick-ring, .scrim')) return null
+      return el.closest(PICKABLE) ?? el
+    }
+    const move = (e: PointerEvent) => {
+      const el = at(e)
+      if (!el) return void (ring.style.display = 'none')
+      const r = el.getBoundingClientRect()
+      Object.assign(ring.style, { display: 'block', left: `${r.left - 3}px`, top: `${r.top - 3}px`, width: `${r.width + 6}px`, height: `${r.height + 6}px` })
+    }
+    const swallow = (e: Event) => {
+      if (!at(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    const click = (e: MouseEvent) => {
+      const el = at(e)
+      if (!el) return
+      e.preventDefault()
+      e.stopPropagation()
+      const a = describe(el)
+      setHeld((h) => ({ path: location.pathname, list: [...(h.path === location.pathname ? h.list : []).filter((x) => x.selector !== a.selector), a] }))
+      setPicking(false)
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setPicking(false)
+    window.addEventListener('pointermove', move, true)
+    window.addEventListener('pointerdown', swallow, true)
+    window.addEventListener('mousedown', swallow, true)
+    window.addEventListener('click', click, true)
+    window.addEventListener('keydown', esc)
+    return () => {
+      ring.remove()
+      document.body.classList.remove('page-picking')
+      window.removeEventListener('pointermove', move, true)
+      window.removeEventListener('pointerdown', swallow, true)
+      window.removeEventListener('mousedown', swallow, true)
+      window.removeEventListener('click', click, true)
+      window.removeEventListener('keydown', esc)
+    }
+  }, [picking])
+  const start = useCallback(() => setPicking(true), [])
+  const cancel = useCallback(() => setPicking(false), [])
+  const remove = useCallback((sel: string) => setHeld((h) => ({ ...h, list: h.list.filter((a) => a.selector !== sel) })), [])
+  const clear = useCallback(() => setHeld({ path: '', list: [] }), [])
+  const focus = useCallback((a: Anchor) => {
+    const el = document.querySelector(a.selector)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el.classList.remove('page-pick-flash')
+    void (el as HTMLElement).offsetWidth
+    el.classList.add('page-pick-flash')
+  }, [])
+  return { list, picking, start, cancel, remove, clear, focus, label: 'Select on page' }
+}
+
+const PICKABLE = 'a, button, li, tr, article, figure, img, h1, h2, h3, h4, p, pre, .card, [data-id]'
+
+/** A picked thing as the AI will read it: what it says, and a selector that finds it again. */
+function describe(el: Element): Anchor {
+  const text = (el.getAttribute('aria-label') || (el as HTMLElement).innerText || el.getAttribute('alt') || '').replace(/\s+/g, ' ').trim()
+  const href = el.closest('a')?.getAttribute('href') ?? undefined
+  return { selector: cssPath(el), label: text.length > 80 ? text.slice(0, 79) + '…' : text || el.tagName.toLowerCase(), tag: el.tagName.toLowerCase(), text: href }
+}
+
+function cssPath(el: Element): string {
+  const parts: string[] = []
+  for (let n: Element | null = el; n && n !== document.body; n = n.parentElement) {
+    if (n.id) { parts.unshift(`#${CSS.escape(n.id)}`); break }
+    const p: Element | null = n.parentElement
+    const same = p ? [...p.children].filter((c) => c.tagName === n!.tagName) : []
+    parts.unshift(same.length > 1 ? `${n.tagName.toLowerCase()}:nth-of-type(${same.indexOf(n) + 1})` : n.tagName.toLowerCase())
+  }
+  return parts.join(' > ')
+}
+
+const pageText = (list: Anchor[]) =>
+  list.length
+    ? `\n\nI'm looking at ${location.href}. This is about ${list.length === 1 ? 'this' : 'these'} on it:\n${list.map((a, k) => `${k + 1}. "${a.label}"${a.text ? ` (links to ${new URL(a.text, location.href).href})` : ''}`).join('\n')}`
+    : ''
 
 const piecesText = (list: Anchor[]) =>
   list.length

@@ -108,6 +108,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   const stopPicking = useCallback(() => setPicking(false), [])
   const unpickPiece = useCallback((sel: string) => setAskPieces((l) => l.filter((a) => a.selector !== sel)), [])
   const clearPieces = useCallback(() => setAskPieces([]), [])
+  const openUseData = useCallback(() => setUseDataOpen(true), [])
   const ownIt = !!isle.data && me?.id === isle.data.owner.id
   useAskTopic(
     isle.data
@@ -118,8 +119,9 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
               ? ' It is mine: if I ask for changes, update it in place (publish_isle with its id and a short note); if I ask for something new made from it, publish a new isle with it as parent.'
               : " It isn't mine: if I ask for changes, make my own version with publish_isle and parent (keep its data bindings unless a change needs different data)."
           } Keep every data-pid attribute stable so comments and stars stay attached, and tell me the link when it's done.`,
-          suggestions: ownIt ? ['Explain how this page works', 'Make it work well on phones', 'Tighten up the description'] : ['Explain how this page works', 'Make my own version with my data', 'What could be better here?'],
+          suggestions: ownIt ? ['Explain how this page works', 'Make it work well on phones', 'Tighten up the description'] : ['Explain how this page works', 'What could be better here?'],
           pieces: { list: askPieces, picking: picking && pickFor === 'ask', start: startAskPick, cancel: stopPicking, remove: unpickPiece, clear: clearPieces, focus: ring },
+          useData: openUseData,
         }
       : null,
   )

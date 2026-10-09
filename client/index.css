@@ -381,6 +381,10 @@ pre.copy.code { white-space: pre-wrap; word-break: break-word; overflow: auto; m
 .pop-left .popover { left: 0; right: auto; }
 .popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(380px, calc(100vw - 32px)); padding: 14px; box-shadow: var(--shadow-lg); text-align: left; font-weight: 400; }
 .popover textarea { width: 100%; resize: vertical; }
+.popover-title { display: block; margin-bottom: 10px; }
+.page-pick-ring { position: fixed; z-index: 80; pointer-events: none; border: 2px solid var(--accent-2); border-radius: 8px; background: color-mix(in srgb, var(--accent-2) 10%, transparent); display: none; }
+body.page-picking, body.page-picking * { cursor: crosshair !important; }
+.page-pick-flash { animation: flash 1.4s ease-out; }
 .pop-alt { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
 
 /* ---- markdown, folded notes, json ---- */
