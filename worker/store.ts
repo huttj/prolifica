@@ -6,6 +6,7 @@ import type {
 } from '../shared/types'
 import { islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
+import { rectsKey, shotKey } from './shots'
 
 /** Data, isles, the lineage graph and marks. Shared by the REST API and the MCP tools, so both obey the same rules. */
 
@@ -33,8 +34,10 @@ function cleanState(v: unknown): AnchorState | undefined {
   return Object.keys(out).length ? out : undefined
 }
 
-/** The app's URL for an isle's picture; the version in it changes when a newer picture exists. */
-export const shotUrl = (row: Pick<IsleRow, 'id' | 'shot_version'>) => `/api/isles/${row.id}/shot?v=${row.shot_version ?? 0}`
+/** Names an isle's picture: the version it shows, and after a squash (which reuses version numbers) how many there were. */
+export const shotTag = (row: Pick<IsleRow, 'shot_version' | 'squashes'>) => `${row.shot_version ?? 0}${row.squashes ? `s${row.squashes}` : ''}`
+/** The app's URL for an isle's picture; it changes when a newer picture exists. */
+export const shotUrl = (row: Pick<IsleRow, 'id' | 'shot_version' | 'squashes'>) => `/api/isles/${row.id}/shot?v=${shotTag(row)}`
 
 /**
  * The datasets with exactly the same contents as those in a recursive set (the same file saved twice,
@@ -88,6 +91,8 @@ export interface IsleRow {
   slots: string
   bindings: string
   parent_id: string | null
+  /** the parent's version this remix was made from */
+  parent_version: number | null
   relation: Relation | null
   visibility: Visibility
   version: number
@@ -106,6 +111,8 @@ export interface IsleRow {
   deleted_at: number | null
   shot_version: number | null
   shot_at: number | null
+  /** how many times its history was squashed */
+  squashes: number
 }
 
 interface MarkRow {
@@ -947,7 +954,7 @@ export class Store {
           data = dataDelta(prev.bindings, v.bindings)
         } else if (r.parent_id && byId.has(r.parent_id)) {
           const pvs = versionsOf.get(r.parent_id)!
-          const then = [...pvs].reverse().find((pv) => pv.createdAt <= r.created_at) ?? pvs[0]!
+          const then = pvs.find((pv) => pv.version === r.parent_version) ?? [...pvs].reverse().find((pv) => pv.createdAt <= r.created_at) ?? pvs[0]!
           parentVersion = then.version
           delta = await page(then.source, v.source)
           data = dataDelta(then.bindings, v.bindings)
@@ -1107,10 +1114,10 @@ export class Store {
     if (!existing) {
       await this.d1
         .prepare(
-          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, relation, visibility, note, draws, changes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, parent_version, relation, visibility, note, draws, changes, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, relation, visibility, input.note ?? null, draws ?? null, changes ?? null, now, now)
+        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, parent?.version ?? null, relation, visibility, input.note ?? null, draws ?? null, changes ?? null, now, now)
         .run()
     }
 
@@ -1169,6 +1176,97 @@ export class Store {
       .first<{ source_blob: string; bindings: string }>()
     if (!old) fail(404, `This isle has no version ${version} to restore`)
     return (await this.publishIsle({ id, sourceBlob: old!.source_blob, bindings: parseJson(old!.bindings, {}), note: `Restored version ${version}` })).isle
+  }
+
+  /**
+   * Rewrites an isle's history: versions from..to (default: all of them) become one, numbered from, with
+   * version to's page and data and the notes, changes and draws of the run gathered up; later versions
+   * move down to follow it. What pointed at a version by number moves with it: the remixes made from one
+   * and other isles' versions that drew from one.
+   */
+  async squashVersions(id: string, opts: { from?: number; to?: number; note?: string | null } = {}): Promise<{ isle: Isle; renumbered: Record<number, number>; remixes: number; draws: number }> {
+    const me = this.requireViewer()
+    const row = await this.isleRow(id)
+    if (!row || row.owner_id !== me.id) return fail(404, `You have no isle with id ${id}`)
+    const cur = row.version
+    const from = opts.from ?? 1
+    const to = opts.to ?? cur
+    if (cur < 2) fail(400, `"${row.title}" has one version; there is nothing to squash`)
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to > cur || from >= to) fail(400, `Squash a run of versions: from and to between 1 and ${cur}, from before to`)
+    const k = to - from
+    const remap = (v: number) => (v < from ? v : v <= to ? from : v - k)
+
+    type VersionRow = { version: number; owner_id: string; source_blob: string; bindings: string; note: string | null; draws: string | null; changes: string | null; created_at: number }
+    const { results: old } = await this.d1.prepare('SELECT * FROM isle_versions WHERE isle_id = ? AND version >= ? ORDER BY version').bind(id, from).all<VersionRow>()
+    const all: VersionRow[] = [...old, { version: cur, owner_id: row.owner_id, source_blob: row.source_blob, bindings: row.bindings, note: row.note, draws: row.draws, changes: row.changes, created_at: row.updated_at }]
+    const run = all.filter((v) => v.version <= to)
+    const last = run.at(-1)!
+    type Draw = { isle: string; version: number; note: string | null; parts?: string[] }
+    const notes = run.map((v) => v.note?.trim()).filter((n): n is string => !!n)
+    const note = opts.note !== undefined ? opts.note?.trim() || null : notes.join(' · ').slice(0, 2000) || null
+    const changes = run.flatMap((v) => parseJson<{ part: string; what: string }[]>(v.changes, [])).slice(-60)
+    const drew = new Map<string, Draw>()
+    for (const d of run.flatMap((v) => parseJson<Draw[]>(v.draws, []))) if ((drew.get(d.isle)?.version ?? 0) <= d.version) drew.set(d.isle, d)
+    const merged = { note, changes: changes.length ? JSON.stringify(changes) : null, draws: drew.size ? JSON.stringify([...drew.values()]) : null }
+    // a note saying which version was restored names it by its new number
+    const restored = (n: string | null) => n?.replace(/^Restored version (\d+)$/, (_, v) => `Restored version ${remap(Number(v))}`) ?? null
+
+    // other isles' versions that drew from one of these
+    const pattern = `%"isle":${JSON.stringify(id)}%`
+    const { results: drawers } = await this.d1
+      .prepare(`SELECT id AS isle_id, NULL AS version, draws FROM isles WHERE draws LIKE ?1 UNION ALL SELECT isle_id, version, draws FROM isle_versions WHERE draws LIKE ?1`)
+      .bind(pattern)
+      .all<{ isle_id: string; version: number | null; draws: string }>()
+    const redraws = drawers.flatMap((d) => {
+      const list = parseJson<Draw[]>(d.draws, [])
+      const moved = list.map((x) => (x.isle === id ? { ...x, version: remap(x.version) } : x))
+      if (moved.every((x, i) => x.version === list[i]!.version)) return []
+      const json = JSON.stringify(moved)
+      return [d.version === null
+        ? this.d1.prepare('UPDATE isles SET draws = ? WHERE id = ?').bind(json, d.isle_id)
+        : this.d1.prepare('UPDATE isle_versions SET draws = ? WHERE isle_id = ? AND version = ?').bind(json, d.isle_id, d.version)]
+    })
+    const remixes = (await this.d1.prepare('SELECT COUNT(*) AS n FROM isles WHERE parent_id = ? AND parent_version > ?').bind(id, from).first<{ n: number }>())?.n ?? 0
+
+    // the picture of the latest version moves to its new number (an older picture goes, and a new one gets taken)
+    const newCur = remap(cur)
+    const shotNow = row.shot_version === cur
+    if (shotNow) {
+      for (const key of [shotKey, rectsKey]) {
+        const obj = await this.env.BLOBS.get(key(id, cur))
+        if (obj) await this.env.BLOBS.put(key(id, newCur), await obj.arrayBuffer(), { httpMetadata: obj.httpMetadata })
+      }
+    }
+
+    await this.d1.batch([
+      this.d1.prepare('DELETE FROM isle_versions WHERE isle_id = ? AND version BETWEEN ? AND ?').bind(id, from, to),
+      // down by k, through negative numbers so no two rows ever share a version on the way
+      this.d1.prepare('UPDATE isle_versions SET version = ? - version WHERE isle_id = ? AND version > ?').bind(k, id, to),
+      this.d1.prepare('UPDATE isle_versions SET version = -version WHERE isle_id = ? AND version < 0').bind(id),
+      ...all.filter((v) => v.version > to && v.version < cur && restored(v.note) !== v.note).map((v) =>
+        this.d1.prepare('UPDATE isle_versions SET note = ? WHERE isle_id = ? AND version = ?').bind(restored(v.note), id, remap(v.version)),
+      ),
+      ...(to < cur
+        ? [
+            this.d1
+              .prepare('INSERT INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .bind(id, from, last.owner_id, last.source_blob, last.bindings, merged.note, merged.draws, merged.changes, last.created_at),
+            this.d1.prepare('UPDATE isles SET note = ? WHERE id = ?').bind(restored(row.note), id),
+          ]
+        : [this.d1.prepare('UPDATE isles SET note = ?, draws = ?, changes = ? WHERE id = ?').bind(merged.note, merged.draws, merged.changes, id)]),
+      this.d1
+        .prepare('UPDATE isles SET version = ?, squashes = squashes + 1, shot_version = ?, shot_at = CASE WHEN ? THEN shot_at END WHERE id = ?')
+        .bind(newCur, shotNow ? newCur : null, shotNow ? 1 : 0, id),
+      this.d1
+        .prepare('UPDATE isles SET parent_version = CASE WHEN parent_version < ?1 THEN parent_version WHEN parent_version <= ?2 THEN ?1 ELSE parent_version - ?3 END WHERE parent_id = ?4 AND parent_version IS NOT NULL')
+        .bind(from, to, k, id),
+      ...redraws,
+    ])
+    if (row.shot_version) await this.env.BLOBS.delete([shotKey(id, row.shot_version), rectsKey(id, row.shot_version)])
+
+    const renumbered: Record<number, number> = {}
+    for (let v = from + 1; v <= cur; v++) renumbered[v] = remap(v)
+    return { isle: (await this.getIsle(id)).isle, renumbered, remixes, draws: redraws.length }
   }
 
   // ---- lineage ----
@@ -1305,12 +1403,12 @@ export class Store {
   async chart(limit = 20000): Promise<SeaChart> {
     const isles = await this.d1
       .prepare(
-        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.source_blob, i.short_title, i.view_name, u.handle, u.name
+        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.squashes, i.source_blob, i.short_title, i.view_name, u.handle, u.name
          FROM isles i JOIN users u ON u.id = i.owner_id
          WHERE i.deleted_at IS NULL AND i.visibility = 'public' ORDER BY i.created_at LIMIT ?`,
       )
       .bind(limit)
-      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'source_blob' | 'short_title' | 'view_name'> & { handle: string | null; name: string | null }>()
+      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'squashes' | 'source_blob' | 'short_title' | 'view_name'> & { handle: string | null; name: string | null }>()
     const data = await this.d1
       .prepare(
         `SELECT DISTINCT d.id, d.path, d.kind, d.public, d.size FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
@@ -1369,7 +1467,7 @@ export class Store {
       const parent = r.parent_id && shown.has(r.parent_id) ? r.parent_id : null
       let page = pageIndex.get(r.source_blob)
       if (page === undefined) pageIndex.set(r.source_blob, (page = pageIndex.size))
-      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.shot_version ?? 0, page, r.short_title ?? null, r.view_name ?? null])
+      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.squashes ? shotTag(r) : (r.shot_version ?? 0), page, r.short_title ?? null, r.view_name ?? null])
     }
     return chart
   }

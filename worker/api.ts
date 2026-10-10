@@ -8,7 +8,7 @@ import { Db, toPerson, type UserRow } from './db'
 import { sendMagicLink } from './email'
 import { badLinkPage, confirmLinkPage } from './pages'
 import { rectsKey, shootLater, shotKey } from './shots'
-import { Store, StoreError, type Layer, type SourceInput } from './store'
+import { shotTag, Store, StoreError, type Layer, type SourceInput } from './store'
 
 type Args = [Env, ExecutionContext]
 type AuthedRequest = IRequest & { user: UserRow; viaToken: boolean }
@@ -224,7 +224,7 @@ api.get('/api/isles/:id/shot', async (request, env, ctx) => {
   const rects = q.has('rects')
   const obj = row.shot_version ? await env.BLOBS.get((rects ? rectsKey : shotKey)(row.id, row.shot_version)) : null
   if (!obj) return new Response(rects ? 'null' : 'No picture yet', { status: rects ? 200 : 404, headers: { 'content-type': rects ? 'application/json' : 'text/plain', 'cache-control': 'no-store' } })
-  const cache = row.visibility === 'private' ? 'private, max-age=600' : Number(q.get('v')) === row.shot_version ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
+  const cache = row.visibility === 'private' ? 'private, max-age=600' : q.get('v') === shotTag(row) ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
   return new Response(obj.body, { headers: { 'content-type': rects ? 'application/json' : 'image/webp', 'cache-control': cache, 'x-content-type-options': 'nosniff' } })
 })
 api.get('/api/isles/:id/lineage', (request, env) => store(request, env).isleLineage(request.params.id!))
@@ -244,6 +244,12 @@ api.get('/api/isles/:id/versions', (request, env) => store(request, env).version
 api.post('/api/isles/:id/restore', requireAuth, async (request, env, ctx) => {
   const b = await body<{ version?: number }>(request)
   const out = await store(request, env).restoreVersion(request.params.id!, Number(b.version))
+  shootLater(ctx, env, request.params.id!, islesOrigin(request, env))
+  return out
+})
+api.post('/api/isles/:id/squash', requireAuth, async (request, env, ctx) => {
+  const b = await body<{ from?: number; to?: number; note?: string | null }>(request)
+  const out = await store(request, env).squashVersions(request.params.id!, { from: b.from === undefined ? undefined : Number(b.from), to: b.to === undefined ? undefined : Number(b.to), note: b.note })
   shootLater(ctx, env, request.params.id!, islesOrigin(request, env))
   return out
 })

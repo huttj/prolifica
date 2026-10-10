@@ -33,11 +33,12 @@ interface ShotRow {
   visibility: string
   shot_version: number | null
   shot_at: number | null
+  squashes: number
 }
 
 /** Take a shot of the isle's current version unless there is one, or one is already being taken. */
 export async function shootIsle(env: Env, isleId: string, islesOrigin: string, force = false): Promise<void> {
-  const row = await env.DB.prepare('SELECT id, version, visibility, shot_version, shot_at FROM isles WHERE id = ? AND deleted_at IS NULL').bind(isleId).first<ShotRow>()
+  const row = await env.DB.prepare('SELECT id, version, visibility, shot_version, shot_at, squashes FROM isles WHERE id = ? AND deleted_at IS NULL').bind(isleId).first<ShotRow>()
   if (!row || row.shot_version === row.version) return
   const now = Date.now()
   // claim it, so a burst of card views takes one shot, not many
@@ -73,7 +74,8 @@ export async function shootIsle(env: Env, isleId: string, islesOrigin: string, f
     await env.BLOBS.put(shotKey(row.id, row.version), image, { httpMetadata: { contentType: 'image/webp' } })
     const meta: ShotRects = { width: SHOT_W, height: rects.height, rects: rects.rects }
     await env.BLOBS.put(rectsKey(row.id, row.version), JSON.stringify(meta), { httpMetadata: { contentType: 'application/json' } })
-    const done = await env.DB.prepare('UPDATE isles SET shot_version = ? WHERE id = ? AND (shot_version IS NULL OR shot_version < ?)').bind(row.version, row.id, row.version).run()
+    // (unless its history was squashed meanwhile, renumbering the version this shows)
+    const done = await env.DB.prepare('UPDATE isles SET shot_version = ? WHERE id = ? AND version = ? AND squashes = ? AND (shot_version IS NULL OR shot_version < ?)').bind(row.version, row.id, row.version, row.squashes, row.version).run()
     if (done.meta.changes && row.shot_version) await env.BLOBS.delete([shotKey(row.id, row.shot_version), rectsKey(row.id, row.shot_version)])
   } finally {
     await browser.close()

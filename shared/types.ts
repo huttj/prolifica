@@ -238,12 +238,12 @@ export interface SeaChart {
    */
   data: [string | null, string | null, string, number[]?, number?][]
   /**
-   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot version (0: none yet), page, short title, view name].
+   * [id, parentId, title, person, stars, relation, createdAt, version, data, shot (version, 0: none yet; a string naming the picture after a squash), page, short title, view name].
    * page: isles with the same number run the same page (the same HTML), whatever data they show.
    * short title: one to three words for the map, when its publisher gave one.
    * view name: what kind of page it is ("Discourse map"), naming its group on the map.
    */
-  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number, number?, (string | null)?, (string | null)?][]
+  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number | string, number?, (string | null)?, (string | null)?][]
 }
 
 /** Where an isle's data came from: the original data behind each slot, and how it was collected. */

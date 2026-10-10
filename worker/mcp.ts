@@ -109,6 +109,9 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   remix's new feature, a newer version of the original, a fix someone else made — pass
   draws_from: [{isle, version, note: what you took}] on the publish (or edit_isle) that brings them in.
   Works with no other change too (publish_isle with id and draws_from only) to record it afterwards.
+- squash_versions rewrites your own isle's history: a run of versions (or all of them, leaving one v1)
+  becomes one version holding the run's latest page, and later ones are renumbered. Remixes made from
+  those versions and isles that drew from them are repointed for you. Only when the person asks for it.
 - uses: specific pieces (an element, a chart) you lifted from other isles into yours.
 - changes: alongside the note, list what changed part by part — [{part: "legend", what: "clicking an
   entry selects its posts"}] — naming parts by their data-pid. Pass parts on draws_from too, so one
@@ -462,6 +465,18 @@ const TOOLS = [
     name: 'delete_isle',
     description: "Delete one of the person's isles. Remixes of it stay.",
     inputSchema: obj({ id: s('Isle id') }, ['id']),
+    annotations: { destructiveHint: true },
+  },
+  {
+    name: 'squash_versions',
+    description:
+      "Rewrite the history of one of the person's isles: squash a run of its versions into one (by default all of them, so the isle has a single v1). The squashed version keeps the run's latest page and data, with their notes, changes and draws gathered up; the run's earlier pages leave the history. Later versions are renumbered to follow it, and remixes made from any renumbered version, and other isles' versions that drew from one, are repointed to the new numbers so they stay in order. Only neighbours merge: to merge v2 and v4, squash 2 to 4.",
+    inputSchema: obj({
+      id: s('Isle id'),
+      from: { type: 'integer', description: 'First version of the run (default 1)' },
+      to: { type: 'integer', description: 'Last version of the run (default the latest)' },
+      note: s('The squashed version\'s note (default: the run\'s notes joined; "" for none)'),
+    }, ['id']),
     annotations: { destructiveHint: true },
   },
   {
@@ -1035,6 +1050,21 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     case 'delete_isle':
       await store.deleteIsle(String(args.id ?? ''))
       return text('Deleted')
+
+    case 'squash_versions': {
+      const id = String(args.id ?? '')
+      const out = await store.squashVersions(id, {
+        from: args.from === undefined ? undefined : Number(args.from),
+        to: args.to === undefined ? undefined : Number(args.to),
+        note: args.note === undefined ? undefined : args.note === null ? null : String(args.note),
+      })
+      shootLater(ctx, env, id, islesOrigin(request, env))
+      return text({
+        ...brief(out.isle), version: out.isle.version, url: isleLink(out.isle),
+        versions: (await store.versions(id)).map((v) => ({ version: v.version, note: v.note, at: new Date(v.createdAt).toISOString() })),
+        renumbered: out.renumbered, remixes_repointed: out.remixes, draws_repointed: out.draws,
+      })
+    }
 
     case 'lineage': {
       if (str(args.isle)) return text(await store.isleLineage(str(args.isle)!))
