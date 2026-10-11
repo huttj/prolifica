@@ -1,4 +1,5 @@
 import { COLLECTION_METHODS, type Anchor, type DataSource, type IsleSummary, type SlotSpec, type Visibility } from '../shared/types'
+import { familyOffers } from '../shared/features'
 import { appOrigin, islesOrigin, quotaFor } from './auth'
 import { checkIsle, shootLater } from './shots'
 import { applyJsonSets, applyTextEdits, EditError, grepLines, type TextEdit } from '../shared/edits'
@@ -43,6 +44,9 @@ make here is public by default and can be remixed by anyone.
   ("thread.json", "analysis.json", not "data2.json"). If the layout has drifted, suggest a tidier
   one; update_data with a new path moves a file without touching its contents or lineage, and
   update_data with items moves or re-describes many in one call.
+- Files people drop in the upload box land in uploads/. When you work with one, file it first: move it
+  (update_data with a new path) into the folder where it belongs, next to related data, with a name and
+  a short description that say what's inside, then derive from it there. uploads/ is an inbox, not a home.
 - A transformation is just new data with derived_from (the inputs) and transform. Write the
   transform as one plain sentence saying what you did; if a prompt did it, add the prompt after a
   blank line (people see the sentence, the prompt is folded away). Keep the original; derive,
@@ -163,8 +167,8 @@ Nothing you can do with a path, a field list or a filter should pass through you
 ## Test what you publish
 Before publishing over data you shaped, publish_isle with dry_run: true shows each slot next to the shape
 of the data that would fill it, slots the page reads that nothing fills, and which private data would go
-public. When rebinding, get_isle lists other_pages_below: later versions of the page in its family (one
-may already read its wording from data), so pick the page before you bind.
+public. When rebinding, get_isle lists other_pages_in_family: pages elsewhere in its family that this one
+has never run (a later one may already read its wording from data), so pick the page before you bind.
 check_isle opens an isle in a real browser and returns a screenshot with its script errors, failed
 requests and how each data slot loaded. After every publish_isle, check it (at desktop width, and at
 390 for phones when layout matters). If there are errors, a slot failed, or the page is empty or
@@ -175,6 +179,13 @@ Data almost never arrives in the exact shape a page expects. Read the isle's slo
 HTML, to see which fields it really uses), then write a transformed copy of the person's data that fits
 (derived_from the originals, transform saying how) and bind that. Never overwrite their originals. Prefer
 a rebind (from + parent, same page); change the page only when the data can't be made to fit it.
+
+Other versions of the isle may do more. get_isle lists features_elsewhere_in_family (named parts its
+relatives have and it lacks) and other_pages_in_family (pages it has never run, with the notes saying what
+changed). The person chose this isle for what it does: improvements to that same purpose (a fix, a better
+control, a phone layout, wording read from data) come along without asking: start from that page (from +
+parent) or bring the parts in with draws_from. A feature that changes what the page is for, or who it's
+for, is their call: before publishing, ask in a line per feature whether they want it. Say which you took.
 
 ## The person's taste
 library() returns what they've starred (whole isles and single elements, with the element's
@@ -646,6 +657,9 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         transform: dataset.transform, derived_from: dataset.derivedFrom.map((d) => ({ id: d.id, path: d.path })), public: dataset.public,
         source: dataset.source ? { ...sourceBrief(dataset.source), code } : null,
         url: `${app}/d/${dataset.id}`,
+        ...(dataset.path.startsWith('uploads/') && dataset.owner.id === user.id
+          ? { file_it: 'Dropped in through the upload box. Before working from it, move it where it belongs among their data (list_data for their folders; update_data with a new path and a short description).' }
+          : {}),
       }
       const obj = await store.getBlob(row.blob)
       if (!obj) return text({ ...info, error: 'The bytes are missing' }, true)
@@ -838,12 +852,17 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         // where its data came from: what someone making their own version will need to collect, and how
         data_sources: (await store.isleSources(id)).sources.map((x) => ({ original: { id: x.dataset.id, path: x.dataset.path }, feeds: x.slots, site: x.site, method: x.method, has_collector: !!x.code, collected_by_person_in_browser: x.selfServe })),
       }
-      // later versions of this page in its family: a remix may carry a better page to rebind (one that reads its wording from data)
-      const below = await store.pagesBelow(id)
-      if (below.length)
-        out.other_pages_below = {
-          hint: 'Remixes below this isle that run a different page from it, newest first. same_view ones adapted this page; if you are rebinding, check whether one fits better.',
-          pages: below.map(({ row: r, depth }) => ({ id: r.id, title: r.title, relation: r.relation, same_view: r.relation === 'rebind', generations_down: depth, version: r.version, note: r.note, updated: new Date(r.updated_at).toISOString(), url: `${app}/i/${r.id}` })),
+      // what the rest of its family has added: someone making their own version may want it too
+      const offers = familyOffers(await store.evolution(id, { pages: false }), id)
+      if (offers.features.length)
+        out.features_elsewhere_in_family = {
+          hint: 'Named parts other isles in this family have and this one lacks, each from the latest isle that has it. When making a version of this isle, bring in the ones that serve what it is for (draws_from that isle and version, with the parts); ask the person before adding any that would take it somewhere else.',
+          from: offers.features.map((f) => ({ ...f, url: `${app}/i/${f.isle}` })),
+        }
+      if (offers.pages.length)
+        out.other_pages_in_family = {
+          hint: 'Isles in this family running a page this one never has, newest first, with the notes saying what each changed. above: one it came from, changed since; below: a remix of it; beside: another branch. An improvement to the same purpose (a fix, a better control, a phone layout, wording read from data) is worth starting from or drawing in; ask the person about ones that change what the page is for.',
+          pages: offers.pages.map((p) => ({ ...p, url: `${app}/i/${p.id}` })),
         }
       const wantSlice = str(args.grep) || str(args.lines)
       if (wantSlice || args.source !== false) {

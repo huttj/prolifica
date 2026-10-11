@@ -18,9 +18,11 @@ export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, n
   lines.push(`Using the Prolifica connector, make my own version of the isle "${isle.title}" (${isle.id}, ${url}) that shows my data instead of its own.`)
   lines.push('')
   lines.push(`1. Read it with get_isle, including its HTML, so you know what each slot really needs: the slot descriptions, and the fields the page actually reads.`)
+  lines.push(`   Look at features_elsewhere_in_family and other_pages_in_family too: other versions of this isle may have added things. Bring in the ones that serve what this isle is for (start from that page, or draw the parts in with draws_from); if one would take it somewhere else, ask me before adding it.`)
   if (picked.length) {
     lines.push(`2. My data${fetchWhat ? ' so far' : ''}: read each with read_data.`)
     for (const d of picked) lines.push(`   - ${d.path} (${d.kind}, id ${d.id})`)
+    if (picked.some((d) => d.path.startsWith('uploads/'))) lines.push(`   What's under uploads/ I just dropped in. File each where it belongs among my data first (list_data for my folders; update_data with a new path and a short description), and keep what you derive from it next to it.`)
   }
   if (fetchWhat) {
     lines.push(`${picked.length ? '   Also collect' : '2. Collect'} this data: ${fetchWhat}`)
@@ -39,7 +41,7 @@ export function myDataPrompt(isle: Isle, picked: Dataset[], fetchWhat: string, n
     lines.push(`Also: ${notes}`)
   }
   lines.push('')
-  lines.push(`When it works, tell me the link and what you did to my data to make it fit.`)
+  lines.push(`When it works, tell me the link, what you did to my data to make it fit${picked.some((d) => d.path.startsWith('uploads/')) ? ', where you filed my uploads' : ''}, and what you brought in from other versions.`)
   return lines.join('\n')
 }
 
