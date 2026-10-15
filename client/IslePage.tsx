@@ -762,7 +762,7 @@ function IsleSettings({ isle, onChanged }: { isle: Isle; onChanged: () => void }
         ))}
       </div>
       {visibility !== 'private' && isle.visibility === 'private' && (
-        <p className="small muted">Any of your private data this isle shows becomes public with it.</p>
+        <p className="small muted">Any of your private data this isle shows becomes public with it, and so does the data it was derived from.</p>
       )}
       <label className="lbl">Title</label>
       <input className="field" value={title} onChange={(e) => setTitle(e.target.value)} />

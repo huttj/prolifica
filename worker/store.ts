@@ -462,12 +462,7 @@ export class Store {
     await this.checkQuota(me.id, hash, input.bytes.byteLength, existing ? { dataset: existing.id } : undefined)
     await this.putBlob(input.bytes, contentType)
 
-    const parents: DatasetRow[] = []
-    for (const pid of input.derivedFrom ?? []) {
-      const p = await this.datasetRow(pid)
-      if (!p || !this.canReadDataset(p)) fail(400, `derived_from: no data with id ${pid} that you can see`)
-      parents.push(p!)
-    }
+    const parents = await this.parentRows(input.derivedFrom)
 
     const now = Date.now()
     const id = existing?.id ?? shortId()
@@ -494,15 +489,72 @@ export class Store {
         .run()
     }
     await this.applySource(id, input.source)
-    if (input.derivedFrom) {
-      await this.d1.batch([
-        this.d1.prepare(`DELETE FROM edges WHERE src_kind = 'dataset' AND src_id = ? AND rel = 'derived'`).bind(id),
-        ...parents.map((p) =>
-          this.d1.prepare(`INSERT OR IGNORE INTO edges (src_kind, src_id, rel, dst_kind, dst_id, created_at) VALUES ('dataset', ?, 'derived', 'dataset', ?, ?)`).bind(id, p.id, now),
-        ),
-      ])
-    }
+    if (input.derivedFrom) await this.setDerivedFrom(id, parents)
     return (await this.getDataset(id)).dataset
+  }
+
+  /** The datasets named in derived_from, each one the viewer can read. */
+  private async parentRows(ids: string[] | undefined, self?: string): Promise<DatasetRow[]> {
+    const parents: DatasetRow[] = []
+    for (const pid of ids ?? []) {
+      const p = await this.datasetRow(pid)
+      if (!p || !this.canReadDataset(p)) fail(400, `derived_from: no data with id ${pid} that you can see`)
+      if (p!.id === self) fail(400, 'derived_from: data cannot be made from itself')
+      parents.push(p!)
+    }
+    return parents
+  }
+
+  /**
+   * What a dataset was made from, in place of what it said before. When a public or unlisted isle
+   * shows it, or data made from it, the viewer's private data it was made from goes public too.
+   */
+  private async setDerivedFrom(id: string, parents: DatasetRow[]): Promise<DatasetRef[]> {
+    const now = Date.now()
+    await this.d1.batch([
+      this.d1.prepare(`DELETE FROM edges WHERE src_kind = 'dataset' AND src_id = ? AND rel = 'derived'`).bind(id),
+      ...parents.map((p) =>
+        this.d1.prepare(`INSERT OR IGNORE INTO edges (src_kind, src_id, rel, dst_kind, dst_id, created_at) VALUES ('dataset', ?, 'derived', 'dataset', ?, ?)`).bind(id, p.id, now),
+      ),
+    ])
+    if (!parents.length) return []
+    const shown = await this.d1
+      .prepare(
+        `WITH RECURSIVE down(id) AS (
+           SELECT ?1
+           UNION
+           SELECT e.src_id FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+         )
+         SELECT 1 AS x FROM down JOIN edges b ON b.rel = 'binds' AND b.dst_kind = 'dataset' AND b.dst_id = down.id
+         JOIN isles i ON i.id = b.src_id WHERE i.deleted_at IS NULL AND i.visibility != 'private' LIMIT 1`,
+      )
+      .bind(id)
+      .first()
+    return shown ? this.makePublic(await this.privateAncestors([id])) : []
+  }
+
+  /** The viewer's private data that these datasets were made from, all the way up (not the datasets themselves). */
+  async privateAncestors(ids: string[]): Promise<DatasetRow[]> {
+    if (!ids.length || !this.viewer) return []
+    const { results } = await this.d1
+      .prepare(
+        `WITH RECURSIVE up(id) AS (
+           SELECT value FROM json_each(?1)
+           UNION
+           SELECT e.dst_id FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+         )
+         SELECT d.* FROM up JOIN datasets d ON d.id = up.id
+         WHERE d.id NOT IN (SELECT value FROM json_each(?1)) AND d.deleted_at IS NULL AND d.public = 0 AND d.owner_id = ?2`,
+      )
+      .bind(JSON.stringify(ids), this.viewer.id)
+      .all<DatasetRow>()
+    return results
+  }
+
+  private async makePublic(rows: DatasetRow[]): Promise<DatasetRef[]> {
+    if (!rows.length) return []
+    await this.d1.batch(rows.map((d) => this.d1.prepare('UPDATE datasets SET public = 1 WHERE id = ?').bind(d.id)))
+    return Promise.all(rows.map((d) => this.toDatasetRef(d)))
   }
 
   /**
@@ -537,10 +589,12 @@ export class Store {
     return { ...(await this.getDataset(twin.id)).dataset, kept: path }
   }
 
-  async updateDatasetMeta(id: string, patch: { path?: string; description?: string | null; transform?: string | null; public?: boolean; source?: SourceInput }): Promise<Dataset> {
+  /** madePublic: the data it was made from that went public with it (a public isle shows it). */
+  async updateDatasetMeta(id: string, patch: { path?: string; description?: string | null; transform?: string | null; public?: boolean; source?: SourceInput; derivedFrom?: string[] }): Promise<Dataset & { madePublic?: DatasetRef[] }> {
     const me = this.requireViewer()
     const row = await this.datasetRow(id)
     if (!row || row.owner_id !== me.id) fail(404, `You have no data with id ${id}`)
+    const parents = patch.derivedFrom ? await this.parentRows(patch.derivedFrom, id) : null
     const path = patch.path !== undefined ? normalizePath(patch.path) : row!.path
     try {
       await this.d1
@@ -559,7 +613,8 @@ export class Store {
       throw e
     }
     await this.applySource(id, patch.source)
-    return (await this.getDataset(id)).dataset
+    const madePublic = parents ? await this.setDerivedFrom(id, parents) : []
+    return { ...(await this.getDataset(id)).dataset, ...(madePublic.length ? { madePublic } : {}) }
   }
 
   async deleteDataset(id: string) {
@@ -1030,7 +1085,8 @@ export class Store {
     const visibility: Visibility = input.visibility ?? existing?.visibility ?? 'public'
     if (!['public', 'unlisted', 'private'].includes(visibility)) fail(400, 'visibility is public, unlisted or private')
 
-    // every binding must be data the publisher can read; their own private data goes public with a public isle
+    // every binding must be data the publisher can read; their own private data goes public with a public
+    // isle, and so does their private data it was made from (derived_from, all the way up)
     const madePublic: DatasetRef[] = []
     for (const [slot, did] of Object.entries(bindingIds)) {
       const d = await this.datasetRow(did)
@@ -1041,6 +1097,7 @@ export class Store {
         madePublic.push(await this.toDatasetRef(d!))
       }
     }
+    if (visibility !== 'private') madePublic.push(...(await this.makePublic(await this.privateAncestors(Object.values(bindingIds)))))
 
     const title = (input.title ?? existing?.title ?? (parent ? `${parent.title} (remix)` : '')).trim()
     if (!title) fail(400, 'An isle needs a title')

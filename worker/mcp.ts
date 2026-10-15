@@ -64,7 +64,8 @@ make here is public by default and can be remixed by anyone.
 - Before collecting from a website, call site with its URL: it returns the collectors that have
   worked there (with code) and the data already gathered from it. Reuse before you rewrite.
 - Data is private until something public shows it. Publishing a public isle bound to your
-  private data makes that data public; say so to the person before you do it.
+  private data makes that data public, and the data it was derived from; say so to the person
+  before you do it.
 
 ## Isles
 An isle is ONE self-contained HTML page plus named data slots. The page never embeds the
@@ -467,7 +468,7 @@ const TOOLS = [
     description:
       'Publish an isle (an HTML page with data slots), update your own (id), or remix someone\'s (parent). For a rebind (same page, new data) pass from or parent plus bindings and no html. dry_run checks the bindings against the slots first, publishing nothing. Read guide first.',
     inputSchema: obj({
-      dry_run: { type: 'boolean', description: 'Publish nothing: report each slot with the data that would be bound (its kind and shape next to the slot description), slots the page reads but nothing fills, and which of your private data would become public' },
+      dry_run: { type: 'boolean', description: 'Publish nothing: report each slot with the data that would be bound (its kind and shape next to the slot description), slots the page reads but nothing fills, and which of your private data would become public (with the data it was derived from)' },
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
       title: s('Title'),
       short_title: s('Always give one. One to four words (under ~24 characters) naming what is particular to this one ("Kennewick", "Bike assault", "Paul Graham pushback"): its name on the map, which already shows what kind of page it is'),
@@ -1203,7 +1204,7 @@ async function dryRun(store: Store, user: UserRow, args: Record<string, unknown>
   }
   return {
     dry_run: true, published: false, ok: !problems.length, problems, visibility,
-    would_make_public: madePublic,
+    would_make_public: visibility !== 'private' ? [...madePublic, ...(await store.privateAncestors(Object.values(bindings))).map((d) => d.path)] : madePublic,
     slots: report,
     next: 'Compare each shape with what its slot description asks for; fix the data (derive_data, edit_data) and publish without dry_run.',
   }

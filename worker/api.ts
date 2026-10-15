@@ -350,8 +350,9 @@ api.get('/api/data/:id/raw', async (request, env) => {
   })
 })
 api.patch('/api/data/:id', requireAuth, async (request, env) => {
-  const b = await body<{ path?: string; description?: string | null; public?: boolean; source?: SourceInput }>(request)
-  return store(request, env).updateDatasetMeta(request.params.id!, b)
+  const b = await body<{ path?: string; description?: string | null; public?: boolean; source?: SourceInput; derived_from?: string[] }>(request)
+  const { derived_from, ...patch } = b
+  return store(request, env).updateDatasetMeta(request.params.id!, { ...patch, derivedFrom: Array.isArray(derived_from) ? derived_from.map(String) : undefined })
 })
 api.get('/api/data/:id/collector', async (request, env) => {
   const code = await store(request, env).collectorCode(request.params.id!)
