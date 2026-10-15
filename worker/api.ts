@@ -1,11 +1,12 @@
 import { AutoRouter, error, json, type IRequest, type RequestHandler } from 'itty-router'
 import { HANDLE_RE, RESERVED_HANDLES } from '../shared/handle'
-import type { Anchor, Visibility } from '../shared/types'
+import type { AdminUser, Anchor, Visibility } from '../shared/types'
 import {
-  LINK_TTL_MS, SESSION_COOKIE, SESSION_TTL_MS, appOrigin, clearSessionCookie, getAuth, isLocal, islesOrigin, readCookie, sessionCookie, toMe,
+  LINK_TTL_MS, SESSION_COOKIE, SESSION_TTL_MS, adminEmails, appOrigin, clearSessionCookie, getAuth, isAdminEmail, isLocal, islesOrigin, quotaFor, readCookie,
+  sessionCookie, toMe,
 } from './auth'
 import { Db, toPerson, type UserRow } from './db'
-import { sendMagicLink } from './email'
+import { sendMagicLink, sendStorageGranted, sendStorageRequest } from './email'
 import { badLinkPage, confirmLinkPage } from './pages'
 import { ogKey, rectsKey, shootLater, shotKey } from './shots'
 import { shotTag, Store, StoreError, type Layer, type PublishInput, type SourceInput } from './store'
@@ -33,6 +34,13 @@ const requireAuth: RequestHandler<IRequest, Args> = (request) => {
 const requireSession: RequestHandler<IRequest, Args> = (request) => {
   if (!(request as AuthedRequest).user) return error(401, 'Sign in first')
   if ((request as AuthedRequest).viaToken) return error(403, 'Keys cannot do that; sign in on the site')
+}
+
+const requireAdmin: RequestHandler<IRequest, Args> = (request, env) => {
+  const user = (request as AuthedRequest).user
+  if (!user) return error(401, 'Sign in first')
+  if ((request as AuthedRequest).viaToken) return error(403, 'Keys cannot do that; sign in on the site')
+  if (!isAdminEmail(env, user.email)) return error(403, 'Only admins can do that')
 }
 
 /** Cookie-authenticated writes must come from the app itself (isles are same-site, so SameSite alone is not enough). */
@@ -124,6 +132,20 @@ api.get('/api/me', requireAuth, async (request, env) => {
   const s = store(request, env)
   const { bytes } = await s.usage((request as AuthedRequest).user.id)
   return toMe(env, (request as AuthedRequest).user, bytes)
+})
+
+/** The button by the storage bar: the admins get an email (once, until one of them answers). */
+api.post('/api/me/storage-request', requireSession, async (request, env) => {
+  const me = (request as AuthedRequest).user
+  const quota = quotaFor(env, me)
+  if (!Number.isFinite(quota)) return error(400, 'You have no storage limit')
+  if (!(await new Db(env.DB).requestStorage(me.id))) return { ok: true, already: true }
+  const { bytes } = await store(request, env).usage(me.id)
+  const who = me.handle ? `@${me.handle} (${me.email})` : me.email
+  const link = `${appOrigin(request as unknown as Request, env)}/admin`
+  if (isLocal(request as unknown as Request)) console.log(`[dev] ${who} asks for more storage: ${link}`)
+  else await Promise.all(adminEmails(env).map((to) => sendStorageRequest(env, to, who, fmtMB(bytes), fmtMB(quota), link)))
+  return { ok: true }
 })
 
 api.patch('/api/me', requireSession, async (request, env) => {
@@ -369,5 +391,40 @@ api.delete('/api/data/:id', requireAuth, async (request, env) => {
   return { ok: true }
 })
 api.get('/api/data/:id/lineage', (request, env) => store(request, env).dataLineage(request.params.id!))
+
+// ---- admin ----
+
+const fmtMB = (n: number) => (n >= 1024 * 1024 * 1024 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
+
+api.get('/api/admin/users', requireAdmin, async (request, env): Promise<AdminUser[]> => {
+  const s = store(request, env)
+  const out: AdminUser[] = []
+  for (const u of await new Db(env.DB).allUsers()) {
+    const q = quotaFor(env, u)
+    out.push({
+      id: u.id, email: u.email, handle: u.handle, name: u.name, createdAt: u.created_at, lastLoginAt: u.last_login_at,
+      usage: (await s.usage(u.id)).bytes, quota: Number.isFinite(q) ? q : null, customQuota: u.quota_bytes ?? null, requestedAt: u.quota_requested_at ?? null,
+    })
+  }
+  return out
+})
+
+/** Set someone's storage limit in bytes (null: the default). It answers their request, and tells them by email when they asked. */
+api.patch('/api/admin/users/:id', requireAdmin, async (request, env) => {
+  const b = await body<{ quota?: number | null }>(request)
+  const quota = b.quota === null ? null : Number(b.quota)
+  if (quota !== null && !(Number.isInteger(quota) && quota > 0 && quota <= 1024 ** 4)) return error(400, 'quota is a number of bytes, or null for the default')
+  const db = new Db(env.DB)
+  const u = await db.userById(request.params.id!)
+  if (!u) return error(404, 'No such person')
+  await db.setQuota(u.id, quota)
+  if (u.quota_requested_at) {
+    const now = quotaFor(env, { ...u, quota_bytes: quota })
+    const link = `${appOrigin(request as unknown as Request, env)}/data`
+    if (isLocal(request as unknown as Request)) console.log(`[dev] ${u.email} now has ${fmtMB(now)}: ${link}`)
+    else if (Number.isFinite(now)) await sendStorageGranted(env, u.email, fmtMB(now), link)
+  }
+  return { ok: true }
+})
 
 api.all('/api/*', () => error(404, 'No such endpoint'))

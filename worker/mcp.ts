@@ -65,7 +65,8 @@ make here is public by default and can be remixed by anyone.
   worked there (with code) and the data already gathered from it. Reuse before you rewrite.
 - Data is private until something public shows it. Publishing a public isle bound to your
   private data makes that data public, and the data it was derived from; say so to the person
-  before you do it.
+  before you do it. When no public isle shows it any more (the isle goes private or is deleted),
+  data that went public that way goes private again; data the person made public stays public.
 
 ## Isles
 An isle is ONE self-contained HTML page plus named data slots. The page never embeds the
@@ -1053,7 +1054,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
     case 'publish_isle': {
       if (args.dry_run) return text(await dryRun(store, user, args))
       const pageBefore = str(args.id) ? (await store.getIsle(str(args.id)!)).row.source_blob : null
-      const { isle, madePublic } = await store.publishIsle({
+      const { isle, madePublic, madePrivate } = await store.publishIsle({
         id: str(args.id),
         html: typeof args.html === 'string' ? args.html : undefined,
         from: str(args.from),
@@ -1081,6 +1082,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         version: isle.version,
         url: isleLink(isle),
         made_public: madePublic.map((d) => d.path),
+        ...(madePrivate.length ? { made_private: madePrivate.map((d) => d.path) } : {}),
         ...carried,
         warnings: [
           ...(isle.shortTitle ? [] : ['No short_title, so the map will cut the title down to name it. Give it one (one to four words, what is particular to it): publish_isle with id and short_title.']),
@@ -1092,9 +1094,10 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       })
     }
 
-    case 'delete_isle':
-      await store.deleteIsle(String(args.id ?? ''))
-      return text('Deleted')
+    case 'delete_isle': {
+      const { madePrivate } = await store.deleteIsle(String(args.id ?? ''))
+      return madePrivate.length ? text({ deleted: true, made_private: madePrivate.map((d) => d.path) }) : text('Deleted')
+    }
 
     case 'squash_versions': {
       const id = String(args.id ?? '')

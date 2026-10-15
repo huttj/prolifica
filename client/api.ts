@@ -1,4 +1,4 @@
-import type { ApiToken, Anchor, Dataset, DatasetRef, Evolution, Isle, IsleSources, IsleSummary, IsleVersion, LibraryItem, Lineage, Mark, Me, Person, SeaChart, SiteInfo, SiteSummary, TreeNode, Visibility } from '../shared/types'
+import type { AdminUser, ApiToken, Anchor, Dataset, DatasetRef, Evolution, Isle, IsleSources, IsleSummary, IsleVersion, LibraryItem, Lineage, Mark, Me, Person, SeaChart, SiteInfo, SiteSummary, TreeNode, Visibility } from '../shared/types'
 
 export interface SourcePatch {
   url?: string | null
@@ -66,6 +66,9 @@ export const api = {
   tokens: () => call<ApiToken[]>('GET', '/api/me/tokens'),
   createToken: (label: string) => call<{ token: string; row: ApiToken }>('POST', '/api/me/tokens', { label }),
   revokeToken: (id: string) => call('DELETE', `/api/me/tokens/${encodeURIComponent(id)}`),
+  requestStorage: () => call<{ ok: true; already?: boolean }>('POST', '/api/me/storage-request', {}),
+  adminUsers: () => call<AdminUser[]>('GET', '/api/admin/users'),
+  setQuota: (id: string, quota: number | null) => call('PATCH', `/api/admin/users/${encodeURIComponent(id)}`, { quota }),
 
   person: (handle: string) => call<{ person: Person; following: boolean; isMe: boolean }>('GET', `/api/people/${encodeURIComponent(handle)}`),
   follow: (handle: string, on: boolean) => call('POST', `/api/people/${encodeURIComponent(handle)}/follow`, { on }),

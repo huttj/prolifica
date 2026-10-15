@@ -12,14 +12,32 @@ import { ThreadView } from './Tree'
 import { ErrorBox, Icon, Link, Modal, PersonLink, useAsync, useSession } from './ui'
 
 export function UsageBar() {
-  const { me } = useSession()
+  const { me, refresh, toast } = useSession()
+  const [asking, setAsking] = useState(false)
   if (!me) return null
   if (me.quota === null) return <div className="tiny muted">{fmtBytes(me.usage)} used · no limit</div>
   const pct = Math.min(100, (me.usage / me.quota) * 100)
+  const ask = async () => {
+    setAsking(true)
+    try {
+      await api.requestStorage()
+      await refresh()
+    } catch (e) {
+      toast((e as Error).message)
+    } finally {
+      setAsking(false)
+    }
+  }
   return (
     <div style={{ minWidth: 200 }}>
       <div className="usage"><div style={{ width: `${pct}%` }} /></div>
       <div className="tiny muted" style={{ marginTop: 4 }}>{fmtBytes(me.usage)} of {fmtBytes(me.quota)} used</div>
+      {/* near the limit: ask for more, and an admin gives it */}
+      {me.storageRequested ? (
+        <div className="tiny muted" style={{ marginTop: 6 }}>You asked for more room. You'll get an email when you have it.</div>
+      ) : pct >= 80 && (
+        <button className="btn sm" style={{ marginTop: 6 }} disabled={asking} onClick={ask}>Ask for more room</button>
+      )}
     </div>
   )
 }

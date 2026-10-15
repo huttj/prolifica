@@ -13,8 +13,26 @@ export interface Me extends Person {
   usage: number
   /** null: no limit */
   quota: number | null
+  /** they asked for more storage and no admin has answered yet */
+  storageRequested: boolean
   /** their AI has reached Prolifica's MCP server at least once */
   connected: boolean
+}
+
+/** A person as an admin sees them, on the admin page. */
+export interface AdminUser {
+  id: string
+  email: string
+  handle: string | null
+  name: string | null
+  createdAt: number
+  lastLoginAt: number | null
+  usage: number
+  /** null: no limit */
+  quota: number | null
+  /** their own limit, if an admin set one */
+  customQuota: number | null
+  requestedAt: number | null
 }
 
 export type DataKind = 'csv' | 'json' | 'text' | 'markdown' | 'image' | 'binary'

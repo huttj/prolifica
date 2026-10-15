@@ -4,7 +4,7 @@ import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset
 import type {
   Anchor, AnchorState, CollectionMethod, DataDelta, IsleSource, IsleSources, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
 } from '../shared/types'
-import { islesOrigin, quotaFor, signIsle } from './auth'
+import { appOrigin, islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
 import { rectsKey, shotKey } from './shots'
 
@@ -71,6 +71,8 @@ interface DatasetRow {
   description: string | null
   transform: string | null
   public: number
+  /** 1: public only because a public isle shows it or data made from it (it goes private again with them) */
+  public_auto: number
   source_url: string | null
   source_method: CollectionMethod | null
   source_notes: string | null
@@ -312,7 +314,7 @@ export class Store {
     const limit = quotaFor(this.env, (await this.db.userById(userId)) ?? { email: '' })
     if (!Number.isFinite(limit)) return
     if (bytes + size > limit) {
-      fail(413, `That needs ${fmtBytes(size)} and you have ${fmtBytes(Math.max(0, limit - bytes))} of your ${fmtBytes(limit)} left. Delete some data or old isles to make room.`)
+      fail(413, `That needs ${fmtBytes(size)} and you have ${fmtBytes(Math.max(0, limit - bytes))} of your ${fmtBytes(limit)} left. Delete some data or old isles to make room, or ask for more on ${appOrigin(this.request, this.env)}/data.`)
     }
   }
 
@@ -475,9 +477,9 @@ export class Store {
       await this.d1
         .prepare(
           `UPDATE datasets SET path = ?, kind = ?, content_type = ?, blob = ?, size = ?, description = COALESCE(?, description),
-           transform = COALESCE(?, transform), public = ?, updated_at = ? WHERE id = ?`,
+           transform = COALESCE(?, transform), public = ?, public_auto = CASE WHEN ? THEN 0 ELSE public_auto END, updated_at = ? WHERE id = ?`,
         )
-        .bind(path, kindFor(contentType), contentType, hash, input.bytes.byteLength, input.description ?? null, input.transform ?? null, isPublic ? 1 : 0, now, id)
+        .bind(path, kindFor(contentType), contentType, hash, input.bytes.byteLength, input.description ?? null, input.transform ?? null, isPublic ? 1 : 0, input.public !== undefined ? 1 : 0, now, id)
         .run()
     } else {
       await this.d1
@@ -511,12 +513,15 @@ export class Store {
    */
   private async setDerivedFrom(id: string, parents: DatasetRow[]): Promise<DatasetRef[]> {
     const now = Date.now()
+    const { results: old } = await this.d1.prepare(`SELECT dst_id FROM edges WHERE src_kind = 'dataset' AND src_id = ? AND rel = 'derived'`).bind(id).all<{ dst_id: string }>()
     await this.d1.batch([
       this.d1.prepare(`DELETE FROM edges WHERE src_kind = 'dataset' AND src_id = ? AND rel = 'derived'`).bind(id),
       ...parents.map((p) =>
         this.d1.prepare(`INSERT OR IGNORE INTO edges (src_kind, src_id, rel, dst_kind, dst_id, created_at) VALUES ('dataset', ?, 'derived', 'dataset', ?, ?)`).bind(id, p.id, now),
       ),
     ])
+    const dropped = old.map((o) => o.dst_id).filter((d) => !parents.some((p) => p.id === d))
+    if (dropped.length) await this.privateAgain(dropped)
     if (!parents.length) return []
     const shown = await this.d1
       .prepare(
@@ -553,8 +558,41 @@ export class Store {
 
   private async makePublic(rows: DatasetRow[]): Promise<DatasetRef[]> {
     if (!rows.length) return []
-    await this.d1.batch(rows.map((d) => this.d1.prepare('UPDATE datasets SET public = 1 WHERE id = ?').bind(d.id)))
+    await this.d1.batch(rows.map((d) => this.d1.prepare('UPDATE datasets SET public = 1, public_auto = 1 WHERE id = ?').bind(d.id)))
     return Promise.all(rows.map((d) => this.toDatasetRef(d)))
+  }
+
+  /**
+   * The other way: the viewer's data that went public through isles (these datasets and what they were
+   * made from) goes private again when no public or unlisted isle shows it, or data made from it, any
+   * more (in any version). Data its owner made public stays public.
+   */
+  private async privateAgain(ids: string[]): Promise<DatasetRef[]> {
+    if (!ids.length || !this.viewer) return []
+    const { results } = await this.d1
+      .prepare(
+        `WITH RECURSIVE up(id) AS (
+           SELECT value FROM json_each(?1)
+           UNION
+           SELECT e.dst_id FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+         ), down(start, id) AS (
+           SELECT d.id, d.id FROM up JOIN datasets d ON d.id = up.id WHERE d.owner_id = ?2 AND d.public = 1 AND d.public_auto = 1 AND d.deleted_at IS NULL
+           UNION
+           SELECT down.start, e.src_id FROM down JOIN edges e ON e.dst_kind = 'dataset' AND e.dst_id = down.id AND e.rel = 'derived' AND e.src_kind = 'dataset'
+         ), shown(start) AS (
+           SELECT down.start FROM down JOIN edges b ON b.rel = 'binds' AND b.dst_kind = 'dataset' AND b.dst_id = down.id
+           JOIN isles i ON i.id = b.src_id WHERE i.deleted_at IS NULL AND i.visibility != 'private'
+           UNION
+           SELECT down.start FROM down, isle_versions v, json_each(v.bindings) j, isles i
+           WHERE j.value = down.id AND i.id = v.isle_id AND i.deleted_at IS NULL AND i.visibility != 'private'
+         )
+         SELECT d.* FROM datasets d WHERE d.id IN (SELECT start FROM down) AND d.id NOT IN (SELECT start FROM shown)`,
+      )
+      .bind(JSON.stringify([...new Set(ids)]), this.viewer.id)
+      .all<DatasetRow>()
+    if (!results.length) return []
+    await this.d1.batch(results.map((d) => this.d1.prepare('UPDATE datasets SET public = 0, public_auto = 0 WHERE id = ?').bind(d.id)))
+    return Promise.all(results.map((d) => this.toDatasetRef(d)))
   }
 
   /**
@@ -572,7 +610,7 @@ export class Store {
     }
     if (!twin.description && input.description) { sets.push('description = ?'); vals.push(input.description) }
     if (!twin.transform && input.transform) { sets.push('transform = ?'); vals.push(input.transform) }
-    if (input.public && !twin.public) { sets.push('public = 1') }
+    if (input.public) { sets.push('public = 1', 'public_auto = 0') }
     if (sets.length) await this.d1.prepare(`UPDATE datasets SET ${sets.join(', ')}, updated_at = ? WHERE id = ?`).bind(...vals, Date.now(), twin.id).run()
     if (input.source && (!twin.source_method || twin.source_method === 'upload')) await this.applySource(twin.id, input.source)
     if (input.derivedFrom?.length) {
@@ -598,12 +636,13 @@ export class Store {
     const path = patch.path !== undefined ? normalizePath(patch.path) : row!.path
     try {
       await this.d1
-        .prepare('UPDATE datasets SET path = ?, description = ?, transform = ?, public = ?, updated_at = ? WHERE id = ?')
+        .prepare('UPDATE datasets SET path = ?, description = ?, transform = ?, public = ?, public_auto = ?, updated_at = ? WHERE id = ?')
         .bind(
           path,
           patch.description !== undefined ? patch.description : row!.description,
           patch.transform !== undefined ? patch.transform : row!.transform,
           patch.public !== undefined ? (patch.public ? 1 : 0) : row!.public,
+          patch.public !== undefined ? 0 : row!.public_auto,
           Date.now(),
           id,
         )
@@ -1045,7 +1084,7 @@ export class Store {
     return results.map((r) => r.id)
   }
 
-  async publishIsle(input: PublishInput): Promise<{ isle: Isle; madePublic: DatasetRef[] }> {
+  async publishIsle(input: PublishInput): Promise<{ isle: Isle; madePublic: DatasetRef[]; madePrivate: DatasetRef[] }> {
     const me = this.requireViewer()
     const existing = input.id ? await this.isleRow(input.id) : null
     if (input.id && (!existing || existing.owner_id !== me.id)) fail(404, `You have no isle with id ${input.id} to update. To build on someone else's, pass it as parent instead.`)
@@ -1093,7 +1132,7 @@ export class Store {
       const inheritedOk = d && (parent || existing) && Object.values(parseJson<Record<string, string>>((existing ?? parent)!.bindings, {})).includes(did)
       if (!d || !(this.canReadDataset(d) || inheritedOk)) fail(400, `Slot "${slot}": no data with id ${did} that you can see`)
       if (visibility !== 'private' && !d!.public && d!.owner_id === me.id) {
-        await this.d1.prepare('UPDATE datasets SET public = 1 WHERE id = ?').bind(d!.id).run()
+        await this.d1.prepare('UPDATE datasets SET public = 1, public_auto = 1 WHERE id = ?').bind(d!.id).run()
         madePublic.push(await this.toDatasetRef(d!))
       }
     }
@@ -1189,10 +1228,15 @@ export class Store {
         this.d1.prepare(`INSERT OR REPLACE INTO edges (src_kind, src_id, rel, dst_kind, dst_id, meta, created_at) VALUES ('isle', ?, 'uses', 'isle', ?, ?, ?)`).bind(id, u.isle, u.meta, now),
       ),
     ])
-    return { isle: (await this.getIsle(id)).isle, madePublic }
+    // gone private, or no longer showing some data: what went public with it may go private again
+    const before = existing ? Object.values(parseJson<Record<string, string>>(existing.bindings, {})) : []
+    const madePrivate = existing && (visibility === 'private' || before.some((d) => !Object.values(bindingIds).includes(d)))
+      ? await this.privateAgain([...before, ...Object.values(bindingIds)])
+      : []
+    return { isle: (await this.getIsle(id)).isle, madePublic, madePrivate }
   }
 
-  async deleteIsle(id: string) {
+  async deleteIsle(id: string): Promise<{ madePrivate: DatasetRef[] }> {
     const me = this.requireViewer()
     const row = await this.isleRow(id)
     if (!row || row.owner_id !== me.id) fail(404, `You have no isle with id ${id}`)
@@ -1200,6 +1244,10 @@ export class Store {
       this.d1.prepare('UPDATE isles SET deleted_at = ? WHERE id = ?').bind(Date.now(), id),
       this.d1.prepare(`DELETE FROM edges WHERE src_kind = 'isle' AND src_id = ?`).bind(id),
     ])
+    // the data it showed, in any version, may go private again
+    const { results } = await this.d1.prepare('SELECT bindings FROM isle_versions WHERE isle_id = ?').bind(id).all<{ bindings: string }>()
+    const shown = [row!.bindings, ...results.map((r) => r.bindings)].flatMap((b) => Object.values(parseJson<Record<string, string>>(b, {})))
+    return { madePrivate: await this.privateAgain(shown) }
   }
 
   // ---- versions ----

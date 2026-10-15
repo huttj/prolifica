@@ -14,6 +14,8 @@ export interface UserRow {
   mcp_seen_at?: number | null
   /** their own storage limit, overriding the default */
   quota_bytes?: number | null
+  /** when they asked for more storage, until an admin sets their limit */
+  quota_requested_at?: number | null
 }
 
 export function toPerson(u: Pick<UserRow, 'id' | 'handle' | 'name' | 'bio'>): Person {
@@ -59,6 +61,23 @@ export class Db {
 
   markMcpSeen(id: string) {
     return this.d1.prepare('UPDATE users SET mcp_seen_at = ? WHERE id = ?').bind(Date.now(), id).run()
+  }
+
+  /** Note that they asked for more storage. False when they already had (and no one answered yet). */
+  async requestStorage(id: string): Promise<boolean> {
+    const r = await this.d1.prepare('UPDATE users SET quota_requested_at = ? WHERE id = ? AND quota_requested_at IS NULL').bind(Date.now(), id).run()
+    return r.meta.changes > 0
+  }
+
+  /** An admin sets someone's storage limit (null: back to the default); that answers their request. */
+  setQuota(id: string, bytes: number | null) {
+    return this.d1.prepare('UPDATE users SET quota_bytes = ?, quota_requested_at = NULL WHERE id = ?').bind(bytes, id).run()
+  }
+
+  /** Everyone, those waiting for more storage first. */
+  async allUsers(): Promise<UserRow[]> {
+    const { results } = await this.d1.prepare('SELECT * FROM users ORDER BY quota_requested_at IS NULL, quota_requested_at, created_at DESC LIMIT 2000').all<UserRow>()
+    return results
   }
 
   userById(id: string) {

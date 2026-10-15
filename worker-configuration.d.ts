@@ -11,7 +11,7 @@ interface __BaseEnv_Env {
 	EMAIL_FROM: "Prolifica <hello@prolifica.app>";
 	SITE_URL: "https://prolifica.app";
 	ISLES_URL: "https://isles.prolifica.app";
-	QUOTA_BYTES: "5242880";
+	QUOTA_BYTES: "10485760";
 	ADMIN_QUOTA_BYTES: "104857600";
 	SIGNING_KEY: string;
 	ADMINS: string;

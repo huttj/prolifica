@@ -6,6 +6,10 @@ export const SESSION_COOKIE = 'pro_session'
 export const SESSION_TTL_MS = 60 * 24 * 60 * 60 * 1000
 export const LINK_TTL_MS = 15 * 60 * 1000
 
+export function adminEmails(env: Env) {
+  return (env.ADMINS ?? '').split(',').map((e) => e.trim()).filter(Boolean)
+}
+
 export function isAdminEmail(env: Env, email: string) {
   // ADMINS is a secret (wrangler secret put ADMINS; .dev.vars locally): a comma-separated list of emails
   return (env.ADMINS ?? '').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean).includes(email.trim().toLowerCase())
@@ -89,14 +93,14 @@ export function isIslesHost(request: Request, env: Env) {
 
 export function toMe(env: Env, u: UserRow, usage: number): Me {
   const q = quotaFor(env, u)
-  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, connected: !!u.mcp_seen_at }
+  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, storageRequested: !!u.quota_requested_at, connected: !!u.mcp_seen_at }
 }
 
 /** Bytes a person may keep: their own limit if they have one; admins (the site's own people) get more. */
 export function quotaFor(env: Env, u: Pick<UserRow, 'email' | 'quota_bytes'>) {
   if (u.quota_bytes) return u.quota_bytes
   if (isAdminEmail(env, u.email)) return Number(env.ADMIN_QUOTA_BYTES) || 100 * 1024 * 1024
-  return Number(env.QUOTA_BYTES) || 5 * 1024 * 1024
+  return Number(env.QUOTA_BYTES) || 10 * 1024 * 1024
 }
 
 // ---- signed frame links for private isles ----

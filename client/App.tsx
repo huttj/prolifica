@@ -1,5 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Me } from '../shared/types'
+import { Admin } from './Admin'
 import { api, ApiError } from './api'
 import { Archipelago } from './Archipelago'
 import { AskTopicProvider, HeaderAsk } from './ask'
@@ -78,6 +79,7 @@ export function App() {
   else if ((m = /^\/s\/([^/]+)\/?$/.exec(path))) page = <SitePage site={decodeURIComponent(m[1]!)} />
   else if (path === '/settings') page = <Settings key={me?.id ?? 'anon'} />
   else if (path === '/connect') page = <Connect />
+  else if (path === '/admin') page = <Admin />
   else if (path === '/login') page = <Login next={query.get('next')} />
   else page = <div className="wrap page-head"><h1>Nothing here</h1><p className="muted">That page drifted off. <Link to="/">Back to the archipelago</Link>.</p></div>
 
@@ -104,6 +106,7 @@ export function App() {
           {me ? (
             <>
               {me.handle && nav(`/@${me.handle}`, `@${me.handle}`, 'hide-sm')}
+              {me.isAdmin && nav('/admin', 'People', 'hide-sm')}
               {nav('/settings', 'Settings')}
             </>
           ) : (
