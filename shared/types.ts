@@ -91,6 +91,8 @@ export interface IsleSummary {
 }
 
 export interface Isle extends IsleSummary {
+  /** Markdown for agents on how to use and rebind this page: what drives its wording, what is fixed, its quirks. */
+  instructions: string | null
   slots: Record<string, SlotSpec>
   bindings: Record<string, DatasetRef | null>
   parent: IsleSummary | null

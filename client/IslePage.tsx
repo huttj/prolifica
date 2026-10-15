@@ -4,7 +4,7 @@ import { ago, api, type Layer, type Marks, who } from './api'
 import { navigate } from './navigate'
 import { AskPopover, useAskTopic } from './ask'
 import { DataModal } from './DataPages'
-import { FoldedMarkdown } from './Markdown'
+import { FoldedMarkdown, Markdown } from './Markdown'
 import { ThreadView } from './Tree'
 import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
@@ -707,6 +707,12 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
         </div>
       )}
       <DataSources isle={isle} />
+      {isle.instructions && (
+        <details className="isle-instructions">
+          <summary>Instructions for agents</summary>
+          <Markdown text={isle.instructions} />
+        </details>
+      )}
       <div className="row">
         <a className="btn sm" href={`/api/isles/${isle.id}/source`} target="_blank" rel="noreferrer"><Icon name="code" /> Page source</a>
       </div>

@@ -200,7 +200,7 @@ api.post('/api/isles', requireAuth, async (request, env, ctx) => {
   const out = await store(request, env).publishIsle({
     id: b.id, html: b.html, from: b.from, title: b.title, description: b.description, slots: b.slots, bindings: b.bindings,
     parent: b.parent, uses: b.uses, visibility: b.visibility, note: b.note, view: b.view, drawsFrom: b.drawsFrom,
-    changes: b.changes, shortTitle: b.shortTitle, viewName: b.viewName,
+    changes: b.changes, shortTitle: b.shortTitle, viewName: b.viewName, instructions: b.instructions,
   })
   shootLater(ctx, env, out.isle.id, islesOrigin(request, env))
   return out

@@ -142,6 +142,19 @@ data: it asks for it by slot name, so anyone can run their own data through it.
 - Update your own isle in place with id=<isle> and a short note saying what changed; each
   update keeps the old version, and people can look back through the history.
 
+## Instructions for agents
+An isle can carry instructions: a short markdown file written for agents, about that one page. What
+drives its wording (which data fields), what is fixed in the page, the quirks that take an hour to find
+in 90 KB of HTML. get_isle returns them first. Read them before you rebind, remix or edit an isle, and
+trust them over a guess from the page. They go with the page: a rebind, a remix and a propagated page
+get the instructions of the isle the page came from, unless you give new ones.
+- Write them for every page you make, and update them when you learn something about a page or change
+  it: instructions (the whole text) on publish_isle or edit_isle, or instruction_edits on edit_isle for a
+  few lines. A change to the instructions only does not make a new version.
+- About the page, not the data: slots and the fields it reads, the wording each meta field fills, the
+  text that is fixed in the page, limits (sizes, counts), what breaks and how to avoid it. Keep them
+  short and specific; the slot descriptions already list the columns.
+
 ## Small changes are cheap
 Don't read or resend a whole page to change a few words. get_isle with grep (or lines) returns just the
 matching lines; edit_isle applies exact find/replace edits on the server (to your isle as a new version,
@@ -368,7 +381,7 @@ const TOOLS = [
   },
   {
     name: 'get_isle',
-    description: 'One isle: details, slots, bound data, parent, what it borrowed, and (by default) its HTML source. Read this before remixing.',
+    description: 'One isle: its instructions for agents (how to use and rebind the page), details, slots, bound data, parent, what it borrowed, and (by default) its HTML source. Read this before remixing.',
     inputSchema: obj({
       id: s('Isle id'),
       source: { type: 'boolean', description: 'Include the whole HTML (default true, unless grep or lines is given). Pages can be large: for a small change, grep for what you need and use edit_isle.' },
@@ -381,10 +394,12 @@ const TOOLS = [
   {
     name: 'edit_isle',
     description:
-      'Change a few things in an isle\'s page without resending it: exact find/replace edits applied on the server. On your own isle it becomes a new version (with note); with as_remix it publishes your own version of any isle (parent set for you). Each find must match exactly once unless all: true. Use get_isle with grep to find the text first, then check_isle.',
+      'Change a few things in an isle\'s page (or its instructions for agents) without resending it: exact find/replace edits applied on the server. On your own isle a page change becomes a new version (with note); with as_remix it publishes your own version of any isle (parent set for you). Each find must match exactly once unless all: true. Use get_isle with grep to find the text first, then check_isle.',
     inputSchema: obj({
       id: s('Isle id'),
-      edits: { type: 'array', description: 'Applied in order', items: obj({ find: s('Exact text to find (include enough around it to be unique)'), replace: s('What to put instead'), all: { type: 'boolean', description: 'Replace every occurrence' } }, ['find', 'replace']) },
+      edits: { type: 'array', description: 'Edits to the page, applied in order', items: obj({ find: s('Exact text to find (include enough around it to be unique)'), replace: s('What to put instead'), all: { type: 'boolean', description: 'Replace every occurrence' } }, ['find', 'replace']) },
+      instructions: s('Instructions for agents about this page, in markdown: what drives its wording, what is fixed, its quirks (the whole text; "" clears them). Default: the ones of the isle the page came from'),
+      instruction_edits: { type: 'array', description: 'Find/replace edits to the instructions, applied in order (instead of instructions)', items: obj({ find: s('Exact text to find'), replace: s('What to put instead'), all: { type: 'boolean' } }, ['find', 'replace']) },
       note: s('What changed, for the version history (or, as a remix, what you changed from the original)'),
       view: s('"same" if the page is still the same view (adapted to data, small fixes), "new" if it now looks or works differently', { enum: ['same', 'new'] }),
       as_remix: { type: 'boolean', description: 'Publish the edited page as a new isle with this one as its parent, instead of updating it' },
@@ -394,7 +409,7 @@ const TOOLS = [
       changes: { type: 'array', description: 'What this version changed, part by part: [{part, what}], part being a component of the page (use its data-pid when it has one, e.g. "legend", "selected-tweet"). Lets people follow one component\'s history across the family.', items: obj({ part: s('The component'), what: s('What changed in it') }, ['part', 'what']) },
       propagate: { type: 'boolean', description: 'When this changes the page of your own isle: give the same new page to your other isles that ran the old one (each gets a version drawing from this one). Others\' isles are never touched.' },
       draws_from: { type: 'array', description: 'Other isles this version pulls changes from (not its parent): e.g. you brought in a sibling remix\'s new sidebar. [{isle, version (default: its latest), note: what you took}]. Shown as a converging edge in the family graph.', items: obj({ isle: s('Isle id'), version: { type: 'integer' }, note: s('What you took from it'), parts: { type: 'array', items: { type: 'string' }, description: 'Which components you took (data-pid names)' } }, ['isle']) },
-    }, ['id', 'edits']),
+    }, ['id']),
   },
   {
     name: 'edit_data',
@@ -460,7 +475,8 @@ const TOOLS = [
       description: s('What it shows, in two to four short sentences (blank lines between paragraphs). The data shape it expects goes in the slot descriptions, not here.'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
       bindings: { type: 'object', description: 'Slot name -> dataset id', additionalProperties: { type: 'string' } },
-      parent: s('The isle this builds on (sets the lineage)'),
+      instructions: s('Instructions for agents about this page, in markdown: what drives its wording, what is fixed, its quirks (the whole text; "" clears them). Default: the ones of the isle the page came from'),
+      parent: s('The isle this builds on (sets the lineage). An isle of yours with no parent can be given one later, once'),
       from: s('Take the page from this isle instead of passing html'),
       uses: { type: 'array', description: 'Pieces borrowed from other isles', items: obj({ isle: s('Isle id'), ...ANCHOR_PROPS }, ['isle']) },
       visibility: s('public (default), unlisted, or private', { enum: ['public', 'unlisted', 'private'] }),
@@ -842,6 +858,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       const { isle, row } = await store.getIsle(id)
       const out: Record<string, unknown> = {
         ...brief(isle),
+        instructions: isle.instructions ?? `None yet. Once you know this page, write them (instructions on publish_isle or edit_isle): what drives its wording, what is fixed, its quirks.`,
         version: isle.version,
         slots: isle.slots,
         bindings: Object.fromEntries(Object.entries(isle.bindings).map(([k, d]) => [k, d ? { id: d.id, path: d.path, kind: d.kind, by: d.owner.handle } : null])),
@@ -885,10 +902,15 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       const pageBefore = (await store.getIsle(String(args.id ?? ''))).row.source_blob
       const id = String(args.id ?? '')
       const { isle, row } = await store.getIsle(id)
-      let html: string
-      let replaced: number
+      const pageEdits = Array.isArray(args.edits) && args.edits.length ? (args.edits as TextEdit[]) : undefined
+      const instrEdits = Array.isArray(args.instruction_edits) && args.instruction_edits.length ? (args.instruction_edits as TextEdit[]) : undefined
+      if (!pageEdits && !instrEdits && typeof args.instructions !== 'string') throw new StoreError(400, 'Give edits (to the page), or instructions or instruction_edits')
+      let html: string | undefined
+      let replaced = 0
+      let instructions = typeof args.instructions === 'string' ? args.instructions : undefined
       try {
-        ;({ text: html, replaced } = applyTextEdits(await store.blobText(row.source_blob), args.edits as TextEdit[]))
+        if (pageEdits) ({ text: html, replaced } = applyTextEdits(await store.blobText(row.source_blob), pageEdits))
+        if (instrEdits) instructions = applyTextEdits(row.instructions ?? '', instrEdits).text
       } catch (e) {
         if (e instanceof EditError) throw new StoreError(400, e.message)
         throw e
@@ -897,11 +919,11 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       const mine = row.owner_id === user.id
       if (!mine && !args.as_remix) throw new StoreError(403, `"${isle.title}" isn't yours, so it can't change in place. Pass as_remix: true to publish your own version with these edits.`)
       const { isle: out } = args.as_remix
-        ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, shortTitle: str(args.short_title), bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
-        : await store.publishIsle({ id, html, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes) })
+        ? await store.publishIsle({ parent: id, html, title: str(args.title) ?? `${isle.title} (remix)`, shortTitle: str(args.short_title), bindings: args.bindings && typeof args.bindings === 'object' ? (Object.fromEntries(Object.entries(args.bindings).map(([k, v]) => [k, String(v)])) as Record<string, string>) : undefined, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes), instructions })
+        : await store.publishIsle({ id, html, note: str(args.note), view, drawsFrom: drawsOf(args.draws_from), changes: changesOf(args.changes), instructions })
       shootLater(ctx, env, out.id, islesOrigin(request, env))
       const carried = args.as_remix ? {} : await carryPage(store, out.id, out.version, pageBefore, !!args.propagate, str(args.note), changesOf(args.changes), (i) => shootLater(ctx, env, i, islesOrigin(request, env)))
-      return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, ...carried, next: 'check_isle to see it', ...(args.as_remix && !out.shortTitle ? { warning: 'No short_title, so the map will cut the title down to name it. Give it one: publish_isle with id and short_title.' } : {}) })
+      return text({ ...brief(out), version: out.version, url: isleLink(out), replaced, ...(instructions !== undefined ? { instructions: out.instructions ? `saved (${out.instructions.length} characters)` : 'cleared' } : html && out.instructions ? { instructions_hint: 'The page changed and its instructions did not: if what you changed is in them, update them (instruction_edits).' } : {}), ...carried, next: html ? 'check_isle to see it' : undefined, ...(args.as_remix && !out.shortTitle ? { warning: 'No short_title, so the map will cut the title down to name it. Give it one: publish_isle with id and short_title.' } : {}) })
     }
 
     case 'edit_data': {
@@ -1047,6 +1069,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         changes: changesOf(args.changes),
         shortTitle: typeof args.short_title === 'string' ? args.short_title : undefined,
         viewName: typeof args.view_name === 'string' ? args.view_name : undefined,
+        instructions: typeof args.instructions === 'string' ? args.instructions : undefined,
       })
       shootLater(ctx, env, isle.id, islesOrigin(request, env))
       const carried = pageBefore ? await carryPage(store, isle.id, isle.version, pageBefore, !!args.propagate, str(args.note), changesOf(args.changes), (i) => shootLater(ctx, env, i, islesOrigin(request, env))) : {}
@@ -1060,6 +1083,8 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         ...carried,
         warnings: [
           ...(isle.shortTitle ? [] : ['No short_title, so the map will cut the title down to name it. Give it one (one to four words, what is particular to it): publish_isle with id and short_title.']),
+          ...(isle.instructions ? [] : ['No instructions for agents. Once you know the page, write them (what drives its wording, what is fixed, its quirks): publish_isle or edit_isle with id and instructions.']),
+          ...(isle.instructions && typeof args.html === 'string' && typeof args.instructions !== 'string' ? ['The page changed and kept the instructions it had (or its parent\'s): if what you changed is in them, update them (edit_isle with instruction_edits).'] : []),
           ...unbound.map((k) => `slot "${k}" is bound to data that no longer exists`),
           ...missing.map((k) => `slot "${k}" has no data bound`),
         ],
@@ -1201,7 +1226,7 @@ async function carryPage(
   for (const o of others) {
     try {
       const { isle: out } = await store.publishIsle({
-        id: o, sourceBlob: row.source_blob, view: 'same',
+        id: o, sourceBlob: row.source_blob, instructions: row.instructions ?? undefined, view: 'same',
         note: `Took the page from "${isle.title}" v${version}${note ? `: ${note}` : ''}`,
         drawsFrom: [{ isle: id, version, note: note ?? 'its page' }], changes,
       })

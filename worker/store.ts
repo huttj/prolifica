@@ -58,6 +58,7 @@ const fail = (status: number, message: string): never => {
 export const MAX_HTML_BYTES = 1024 * 1024
 export const MAX_SNIPPET = 8 * 1024
 export const MAX_COMMENT = 4000
+export const MAX_INSTRUCTIONS = 16 * 1024
 
 interface DatasetRow {
   id: string
@@ -105,6 +106,8 @@ export interface IsleRow {
   short_title: string | null
   /** what kind of page it is ("Discourse map"): the format, not the content */
   view_name: string | null
+  /** markdown for agents on how to use and rebind this page; each version keeps its own */
+  instructions: string | null
   star_count: number
   created_at: number
   updated_at: number
@@ -153,6 +156,8 @@ export interface PublishInput {
   shortTitle?: string | null
   /** what kind of page it is, the format ("Discourse map", "City guide"); a rebind inherits its parent's */
   viewName?: string | null
+  /** markdown for agents on how to use and rebind the page; null or "" clears them. Default: what the page's isle had */
+  instructions?: string | null
   /** internal: put back a page this isle had before (restoring a version) */
   sourceBlob?: string
 }
@@ -769,6 +774,7 @@ export class Store {
       row,
       isle: {
         ...(await this.toSummary(row)),
+        instructions: row.instructions ?? null,
         slots: parseJson(row.slots, {}),
         bindings: bound,
         parent: parentRow && this.canSeeIsle(parentRow) ? await this.toSummary(parentRow) : null,
@@ -991,6 +997,14 @@ export class Store {
 
     const parent = input.parent ? await this.visibleIsleRow(input.parent) : existing?.parent_id ? await this.isleRow(existing.parent_id) : null
     const from = input.from ? await this.visibleIsleRow(input.from) : null
+    // an isle published on its own can be given a parent later, once; after that the parent stays
+    if (existing?.parent_id && parent && parent.id !== existing.parent_id) fail(400, `This isle's parent is ${existing.parent_id}; a parent, once set, never changes`)
+    const adopting = !!(existing && !existing.parent_id && parent)
+    if (adopting) {
+      if (parent!.id === existing!.id) fail(400, 'An isle can\'t be its own parent')
+      for (let up: IsleRow | null = parent, n = 0; up && n < 500; up = up.parent_id ? await this.isleRow(up.parent_id) : null, n++)
+        if (up.id === existing!.id) fail(400, `${parent!.title} comes from this isle, so it can't be its parent`)
+    }
 
     // the page: new html, or another isle's page (a rebind), or what it had, or the parent's
     let sourceHash: string
@@ -1033,7 +1047,7 @@ export class Store {
     const description = input.description !== undefined ? input.description : (existing?.description ?? null)
     // the relation is settled when the remix is made, or again when its publisher says whether the view changed
     let relation = existing?.relation ?? null
-    if (parent && (!existing || input.view)) {
+    if (parent && (!existing || adopting || input.view)) {
       const similarity = !input.view && sourceHash !== parent.source_blob ? pageSimilarity(await this.blobText(parent.source_blob), input.html ?? (await this.blobText(sourceHash))) : undefined
       relation = classifyRelation({ source: parent.source_blob, bindings: parseJson(parent.bindings, {}) }, { source: sourceHash, bindings: bindingIds }, { view: input.view, similarity })
     }
@@ -1056,6 +1070,15 @@ export class Store {
       ? JSON.stringify(input.changes.filter((c) => c && c.part && c.what).slice(0, 40).map((c) => ({ part: partName(String(c.part)), what: String(c.what).slice(0, 600) }))) || null
       : undefined
 
+    // instructions for agents go with the page: given, or the ones of the isle the page came from
+    let instructions: string | null | undefined
+    if (input.instructions !== undefined) {
+      instructions = input.instructions?.trim() || null
+      if (instructions && new TextEncoder().encode(instructions).byteLength > MAX_INSTRUCTIONS) fail(413, `Instructions can be ${fmtBytes(MAX_INSTRUCTIONS)} at most; say what an agent can't see quickly in the page`)
+    } else if (from && from.id !== existing?.id) instructions = from.instructions ?? undefined
+    else if (parent && (!existing || (adopting && !existing.instructions))) instructions = parent.instructions ?? undefined
+    instructions = instructions === undefined ? (existing?.instructions ?? null) : instructions
+
     const shortTitle = input.shortTitle === undefined ? undefined : input.shortTitle === null ? null : input.shortTitle.trim().replace(/\s+/g, ' ').slice(0, 40) || null
     let viewName = input.viewName === undefined ? undefined : input.viewName === null ? null : input.viewName.trim().replace(/\s+/g, ' ').slice(0, 40) || null
     // same page, new data: it is the same kind of page as its parent
@@ -1066,31 +1089,32 @@ export class Store {
     const samePage = existing && existing.source_blob === sourceHash && existing.bindings === JSON.stringify(bindingIds) && existing.slots === JSON.stringify(slots)
     if (existing && samePage) {
       await this.d1
-        .prepare('UPDATE isles SET title = ?, description = ?, visibility = ?, draws = COALESCE(?, draws), changes = COALESCE(?, changes), updated_at = ? WHERE id = ?')
-        .bind(title.slice(0, 200), description, visibility, draws ?? null, changes ?? null, now, id)
+        .prepare('UPDATE isles SET title = ?, description = ?, visibility = ?, instructions = ?, draws = COALESCE(?, draws), changes = COALESCE(?, changes), updated_at = ? WHERE id = ?')
+        .bind(title.slice(0, 200), description, visibility, instructions, draws ?? null, changes ?? null, now, id)
         .run()
     } else if (existing) {
       await this.d1.batch([
         this.d1
-          .prepare('INSERT OR IGNORE INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(id, existing.version, me.id, existing.source_blob, existing.bindings, existing.note, existing.draws ?? null, existing.changes ?? null, existing.updated_at),
+          .prepare('INSERT OR IGNORE INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, instructions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(id, existing.version, me.id, existing.source_blob, existing.bindings, existing.note, existing.draws ?? null, existing.changes ?? null, existing.instructions ?? null, existing.updated_at),
         this.d1
-          .prepare('UPDATE isles SET title = ?, description = ?, source_blob = ?, slots = ?, bindings = ?, visibility = ?, version = version + 1, note = ?, draws = ?, changes = ?, updated_at = ? WHERE id = ?')
-          .bind(title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), visibility, input.note ?? null, draws ?? null, changes ?? null, now, id),
+          .prepare('UPDATE isles SET title = ?, description = ?, source_blob = ?, slots = ?, bindings = ?, visibility = ?, version = version + 1, note = ?, draws = ?, changes = ?, instructions = ?, updated_at = ? WHERE id = ?')
+          .bind(title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), visibility, input.note ?? null, draws ?? null, changes ?? null, instructions, now, id),
       ])
     }
+    if (adopting) await this.d1.prepare('UPDATE isles SET parent_id = ?, parent_version = ? WHERE id = ?').bind(parent!.id, parent!.version, id).run()
     if (existing && relation !== existing.relation) await this.d1.prepare('UPDATE isles SET relation = ? WHERE id = ?').bind(relation, id).run()
-    if (shortTitle !== undefined) await this.d1.prepare('UPDATE isles SET short_title = ? WHERE id = ?').bind(shortTitle, id).run()
-    if (viewName !== undefined) await this.d1.prepare('UPDATE isles SET view_name = ? WHERE id = ?').bind(viewName, id).run()
     if (!existing) {
       await this.d1
         .prepare(
-          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, parent_version, relation, visibility, note, draws, changes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO isles (id, owner_id, title, description, source_blob, slots, bindings, parent_id, parent_version, relation, visibility, note, draws, changes, instructions, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, parent?.version ?? null, relation, visibility, input.note ?? null, draws ?? null, changes ?? null, now, now)
+        .bind(id, me.id, title.slice(0, 200), description, sourceHash, JSON.stringify(slots), JSON.stringify(bindingIds), parent?.id ?? null, parent?.version ?? null, relation, visibility, input.note ?? null, draws ?? null, changes ?? null, instructions, now, now)
         .run()
     }
+    if (shortTitle !== undefined) await this.d1.prepare('UPDATE isles SET short_title = ? WHERE id = ?').bind(shortTitle, id).run()
+    if (viewName !== undefined) await this.d1.prepare('UPDATE isles SET view_name = ? WHERE id = ?').bind(viewName, id).run()
 
     const uses = input.uses ?? null
     const useRows: { isle: string; meta: string }[] = []
@@ -1142,11 +1166,11 @@ export class Store {
     const row = await this.isleRow(id)
     if (!row || row.owner_id !== me.id) fail(404, `You have no isle with id ${id}`)
     const old = await this.d1
-      .prepare('SELECT source_blob, bindings FROM isle_versions WHERE isle_id = ? AND version = ?')
+      .prepare('SELECT source_blob, bindings, instructions FROM isle_versions WHERE isle_id = ? AND version = ?')
       .bind(id, version)
-      .first<{ source_blob: string; bindings: string }>()
+      .first<{ source_blob: string; bindings: string; instructions: string | null }>()
     if (!old) fail(404, `This isle has no version ${version} to restore`)
-    return (await this.publishIsle({ id, sourceBlob: old!.source_blob, bindings: parseJson(old!.bindings, {}), note: `Restored version ${version}` })).isle
+    return (await this.publishIsle({ id, sourceBlob: old!.source_blob, bindings: parseJson(old!.bindings, {}), instructions: old!.instructions ?? undefined, note: `Restored version ${version}` })).isle
   }
 
   /**
@@ -1167,9 +1191,9 @@ export class Store {
     const k = to - from
     const remap = (v: number) => (v < from ? v : v <= to ? from : v - k)
 
-    type VersionRow = { version: number; owner_id: string; source_blob: string; bindings: string; note: string | null; draws: string | null; changes: string | null; created_at: number }
+    type VersionRow = { version: number; owner_id: string; source_blob: string; bindings: string; note: string | null; draws: string | null; changes: string | null; instructions: string | null; created_at: number }
     const { results: old } = await this.d1.prepare('SELECT * FROM isle_versions WHERE isle_id = ? AND version >= ? ORDER BY version').bind(id, from).all<VersionRow>()
-    const all: VersionRow[] = [...old, { version: cur, owner_id: row.owner_id, source_blob: row.source_blob, bindings: row.bindings, note: row.note, draws: row.draws, changes: row.changes, created_at: row.updated_at }]
+    const all: VersionRow[] = [...old, { version: cur, owner_id: row.owner_id, source_blob: row.source_blob, bindings: row.bindings, note: row.note, draws: row.draws, changes: row.changes, instructions: row.instructions, created_at: row.updated_at }]
     const run = all.filter((v) => v.version <= to)
     const last = run.at(-1)!
     type Draw = { isle: string; version: number; note: string | null; parts?: string[] }
@@ -1220,8 +1244,8 @@ export class Store {
       ...(to < cur
         ? [
             this.d1
-              .prepare('INSERT INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-              .bind(id, from, last.owner_id, last.source_blob, last.bindings, merged.note, merged.draws, merged.changes, last.created_at),
+              .prepare('INSERT INTO isle_versions (isle_id, version, owner_id, source_blob, bindings, note, draws, changes, instructions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+              .bind(id, from, last.owner_id, last.source_blob, last.bindings, merged.note, merged.draws, merged.changes, last.instructions ?? null, last.created_at),
             this.d1.prepare('UPDATE isles SET note = ? WHERE id = ?').bind(restored(row.note), id),
           ]
         : [this.d1.prepare('UPDATE isles SET note = ?, draws = ?, changes = ? WHERE id = ?').bind(merged.note, merged.draws, merged.changes, id)]),
