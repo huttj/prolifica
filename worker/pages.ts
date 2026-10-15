@@ -1,5 +1,7 @@
 /** The few pages the worker renders itself: link confirmation and OAuth sign-in/consent. */
 
+import { OG_H, SHOT_W } from './shots'
+
 export const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 export function page(title: string, body: string, headers?: Headers, status = 200): Response {
@@ -26,6 +28,27 @@ button.secondary{background:transparent;color:var(--ink);border:1px solid var(--
 </style></head><body><main><div class="brand"><svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><circle cx="11" cy="18" r="7" fill="currentColor" opacity=".9"/><circle cx="22" cy="11" r="5" fill="currentColor" opacity=".6"/><circle cx="24" cy="23" r="3.5" fill="currentColor" opacity=".4"/></svg>Prolifica</div>${body}</main></body></html>`,
     { status, headers: h },
   )
+}
+
+/** Link-preview tags (Open Graph, X) for an isle's page in the app, with its picture. */
+export function isleShareTags(isle: { title: string; description: string | null; owner: string | null; url: string; image: string }) {
+  let description = isle.description?.trim().replace(/\s+/g, ' ') || (isle.owner ? `An isle by @${isle.owner} on Prolifica` : 'An isle on Prolifica')
+  // unfurls show two or three lines
+  if (description.length > 200) description = `${description.slice(0, 200).replace(/\s+\S*$/, '')}…`
+  const tags: [string, string, string][] = [
+    ['property', 'og:site_name', 'Prolifica'],
+    ['property', 'og:type', 'website'],
+    ['property', 'og:title', isle.title],
+    ['property', 'og:description', description],
+    ['property', 'og:url', isle.url],
+    ['property', 'og:image', isle.image],
+    ['property', 'og:image:type', 'image/jpeg'],
+    ['property', 'og:image:width', String(SHOT_W)],
+    ['property', 'og:image:height', String(OG_H)],
+    ['property', 'og:image:alt', isle.title],
+    ['name', 'twitter:card', 'summary_large_image'],
+  ]
+  return { title: `${isle.title} · Prolifica`, description, tags: tags.map(([k, n, v]) => `<meta ${k}="${n}" content="${esc(v)}">`).join('') }
 }
 
 /** The link in the email lands here; a click (not a prefetching mail scanner) spends it. */

@@ -4,7 +4,8 @@ import { appOrigin, getAuth, isIslesHost, readBearer } from './auth'
 import { Db } from './db'
 import { handleIslesHost } from './islehost'
 import { handleMcp } from './mcp'
-import { consentPage, esc, page, signInPage } from './pages'
+import { consentPage, esc, isleShareTags, page, signInPage } from './pages'
+import { shotTag } from './store'
 
 /**
  * One worker, two hosts:
@@ -59,11 +60,32 @@ async function authorize(request: Request, env: EnvWithOAuth): Promise<Response>
   }
 }
 
+/**
+ * An isle's page in the app, with link-preview tags so a shared link unfurls with its title and picture.
+ * Only what anyone may see: a private isle gets the plain page.
+ */
+async function islePage(request: Request, env: Env, id: string): Promise<Response> {
+  const res = await env.ASSETS.fetch(new Request(new URL('/', request.url), request))
+  const row = await env.DB.prepare('SELECT i.id, i.title, i.description, i.visibility, i.shot_version, i.squashes, u.handle FROM isles i JOIN users u ON u.id = i.owner_id WHERE i.id = ? AND i.deleted_at IS NULL')
+    .bind(id)
+    .first<{ id: string; title: string; description: string | null; visibility: string; shot_version: number | null; squashes: number; handle: string | null }>()
+  if (!row || row.visibility === 'private' || !res.headers.get('content-type')?.includes('text/html')) return res
+  const origin = appOrigin(request, env)
+  const share = isleShareTags({ title: row.title, description: row.description, owner: row.handle, url: `${origin}/i/${row.id}`, image: `${origin}/api/isles/${row.id}/shot?og&v=${shotTag(row)}` })
+  return new HTMLRewriter()
+    .on('title', { element: (e) => void e.setInnerContent(share.title) })
+    .on('meta[name="description"]', { element: (e) => void e.setAttribute('content', share.description) })
+    .on('head', { element: (e) => void e.append(share.tags, { html: true }) })
+    .transform(res)
+}
+
 const app: ExportedHandler<EnvWithOAuth> = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
     if (url.pathname === '/authorize') return authorize(request, env)
     if (url.pathname.startsWith('/api/') || url.pathname === '/auth/verify') return api.fetch(request, env, ctx)
+    const isle = request.method === 'GET' && /^\/i\/([a-z0-9]+)(?:\/family)?\/?$/.exec(url.pathname)
+    if (isle) return islePage(request, env, isle[1]!)
     if (url.pathname === '/login' && url.searchParams.has('next')) return env.ASSETS.fetch(new Request(new URL('/', url), request))
     return env.ASSETS.fetch(request)
   },

@@ -7,7 +7,7 @@ import {
 import { Db, toPerson, type UserRow } from './db'
 import { sendMagicLink } from './email'
 import { badLinkPage, confirmLinkPage } from './pages'
-import { rectsKey, shootLater, shotKey } from './shots'
+import { ogKey, rectsKey, shootLater, shotKey } from './shots'
 import { shotTag, Store, StoreError, type Layer, type PublishInput, type SourceInput } from './store'
 
 type Args = [Env, ExecutionContext]
@@ -227,16 +227,24 @@ api.post('/api/isles/:id/rebind', requireAuth, async (request, env, ctx) => {
   shootLater(ctx, env, isle.id, islesOrigin(request, env))
   return isle
 })
-/** The isle's picture. Asking for one that's missing or out of date gets a new one taken. */
+/** The isle's picture (?og: the JPEG for link previews). Asking for one that's missing or out of date gets a new one taken. */
 api.get('/api/isles/:id/shot', async (request, env, ctx) => {
   const row = await store(request, env).visibleIsleRow(request.params.id!)
   if (row.shot_version !== row.version) shootLater(ctx, env, row.id, islesOrigin(request, env))
   const q = new URL(request.url).searchParams
   const rects = q.has('rects')
-  const obj = row.shot_version ? await env.BLOBS.get((rects ? rectsKey : shotKey)(row.id, row.shot_version)) : null
+  let obj = row.shot_version ? await env.BLOBS.get((rects ? rectsKey : shotKey)(row.id, row.shot_version)) : null
+  let type = rects ? 'application/json' : 'image/webp'
+  if (q.has('og') && obj && row.shot_version) {
+    const og = await env.BLOBS.get(ogKey(row.id, row.shot_version))
+    // a shot from before link previews: hand out the WebP meanwhile
+    if (og) (obj = og), (type = 'image/jpeg')
+    else if (row.shot_version === row.version) shootLater(ctx, env, row.id, islesOrigin(request, env), true)
+  }
   if (!obj) return new Response(rects ? 'null' : 'No picture yet', { status: rects ? 200 : 404, headers: { 'content-type': rects ? 'application/json' : 'text/plain', 'cache-control': 'no-store' } })
-  const cache = row.visibility === 'private' ? 'private, max-age=600' : q.get('v') === shotTag(row) ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
-  return new Response(obj.body, { headers: { 'content-type': rects ? 'application/json' : 'image/webp', 'cache-control': cache, 'x-content-type-options': 'nosniff' } })
+  const final = q.get('v') === shotTag(row) && !(q.has('og') && type === 'image/webp')
+  const cache = row.visibility === 'private' ? 'private, max-age=600' : final ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
+  return new Response(obj.body, { headers: { 'content-type': type, 'cache-control': cache, 'x-content-type-options': 'nosniff' } })
 })
 api.get('/api/isles/:id/lineage', (request, env) => store(request, env).isleLineage(request.params.id!))
 api.get('/api/isles/:id/marks', (request, env) => {

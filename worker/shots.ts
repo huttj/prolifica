@@ -19,6 +19,9 @@ const MAX_H = 2000
 export const shotKey = (isleId: string, version: number) => `shots/${isleId}/v${version}.webp`
 /** Where marked pieces sit in the picture, so the library can show just that piece. */
 export const rectsKey = (isleId: string, version: number) => `shots/${isleId}/v${version}.json`
+/** The top of the page at about 1.91:1, as JPEG, for link previews (og:image); not every unfurler takes WebP. */
+export const ogKey = (isleId: string, version: number) => `shots/${isleId}/v${version}.og.jpg`
+export const OG_H = 670
 
 export interface ShotRects {
   width: number
@@ -36,14 +39,17 @@ interface ShotRow {
   squashes: number
 }
 
-/** Take a shot of the isle's current version unless there is one, or one is already being taken. */
-export async function shootIsle(env: Env, isleId: string, islesOrigin: string, force = false): Promise<void> {
+/**
+ * Take a shot of the isle's current version unless there is one (or, with `retake`, even then: shots
+ * from before link previews have no og picture), or one is already being taken.
+ */
+export async function shootIsle(env: Env, isleId: string, islesOrigin: string, retake = false): Promise<void> {
   const row = await env.DB.prepare('SELECT id, version, visibility, shot_version, shot_at, squashes FROM isles WHERE id = ? AND deleted_at IS NULL').bind(isleId).first<ShotRow>()
-  if (!row || row.shot_version === row.version) return
+  if (!row || (row.shot_version === row.version && !retake)) return
   const now = Date.now()
   // claim it, so a burst of card views takes one shot, not many
-  const claimed = await env.DB.prepare('UPDATE isles SET shot_at = ? WHERE id = ? AND (shot_at IS NULL OR shot_at < ? OR ?)')
-    .bind(now, row.id, now - RETRY_MS, force ? 1 : 0)
+  const claimed = await env.DB.prepare('UPDATE isles SET shot_at = ? WHERE id = ? AND (shot_at IS NULL OR shot_at < ?)')
+    .bind(now, row.id, now - RETRY_MS)
     .run()
   if (!claimed.meta.changes) return
 
@@ -60,6 +66,8 @@ export async function shootIsle(env: Env, isleId: string, islesOrigin: string, f
     const marked = await env.DB.prepare(`SELECT DISTINCT json_extract(anchor, '$.selector') AS s FROM marks WHERE isle_id = ? AND anchor IS NOT NULL LIMIT 200`)
       .bind(row.id)
       .all<{ s: string | null }>()
+    const og = await page.screenshot({ type: 'jpeg', quality: 80, clip: { x: 0, y: 0, width: SHOT_W, height: OG_H } })
+    await env.BLOBS.put(ogKey(row.id, row.version), og, { httpMetadata: { contentType: 'image/jpeg' } })
     // the page down to MAX_H (cards show its top; the library crops pieces out of it)
     const rects = (await page.evaluate(
       `(() => {
@@ -76,15 +84,15 @@ export async function shootIsle(env: Env, isleId: string, islesOrigin: string, f
     await env.BLOBS.put(rectsKey(row.id, row.version), JSON.stringify(meta), { httpMetadata: { contentType: 'application/json' } })
     // (unless its history was squashed meanwhile, renumbering the version this shows)
     const done = await env.DB.prepare('UPDATE isles SET shot_version = ? WHERE id = ? AND version = ? AND squashes = ? AND (shot_version IS NULL OR shot_version < ?)').bind(row.version, row.id, row.version, row.squashes, row.version).run()
-    if (done.meta.changes && row.shot_version) await env.BLOBS.delete([shotKey(row.id, row.shot_version), rectsKey(row.id, row.shot_version)])
+    if (done.meta.changes && row.shot_version) await env.BLOBS.delete([shotKey(row.id, row.shot_version), rectsKey(row.id, row.shot_version), ogKey(row.id, row.shot_version)])
   } finally {
     await browser.close()
   }
 }
 
 /** Fire and forget, logging failures (a missing shot only means a placeholder). */
-export function shootLater(ctx: { waitUntil(p: Promise<unknown>): void } | undefined, env: Env, isleId: string, islesOrigin: string, force = false) {
-  const p = shootIsle(env, isleId, islesOrigin, force).catch((e) => console.error('shot failed', isleId, e))
+export function shootLater(ctx: { waitUntil(p: Promise<unknown>): void } | undefined, env: Env, isleId: string, islesOrigin: string, retake = false) {
+  const p = shootIsle(env, isleId, islesOrigin, retake).catch((e) => console.error('shot failed', isleId, e))
   if (ctx) ctx.waitUntil(p)
 }
 
