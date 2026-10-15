@@ -8,7 +8,7 @@ import { Db, toPerson, type UserRow } from './db'
 import { sendMagicLink } from './email'
 import { badLinkPage, confirmLinkPage } from './pages'
 import { rectsKey, shootLater, shotKey } from './shots'
-import { shotTag, Store, StoreError, type Layer, type SourceInput } from './store'
+import { shotTag, Store, StoreError, type Layer, type PublishInput, type SourceInput } from './store'
 
 type Args = [Env, ExecutionContext]
 type AuthedRequest = IRequest & { user: UserRow; viaToken: boolean }
@@ -193,6 +193,17 @@ api.get('/api/isles', async (request, env) => {
     limit: Number(q.get('limit')) || 40,
     offset: Number(q.get('offset')) || 0,
   })
+})
+/** Publish a page made elsewhere (Codinger), the same as the MCP publish_isle: new, an update (id) or a remix (parent). */
+api.post('/api/isles', requireAuth, async (request, env, ctx) => {
+  const b = await body<Omit<PublishInput, 'sourceBlob'>>(request)
+  const out = await store(request, env).publishIsle({
+    id: b.id, html: b.html, from: b.from, title: b.title, description: b.description, slots: b.slots, bindings: b.bindings,
+    parent: b.parent, uses: b.uses, visibility: b.visibility, note: b.note, view: b.view, drawsFrom: b.drawsFrom,
+    changes: b.changes, shortTitle: b.shortTitle, viewName: b.viewName,
+  })
+  shootLater(ctx, env, out.isle.id, islesOrigin(request, env))
+  return out
 })
 api.get('/api/isles/:id', async (request, env) => (await store(request, env).getIsle(request.params.id!)).isle)
 api.get('/api/isles/:id/source', async (request, env) => {

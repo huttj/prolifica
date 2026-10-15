@@ -1,3 +1,4 @@
+import type { OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 import type { Me } from '../shared/types'
 import { Db, TOKEN_PREFIX, base64url, type UserRow } from './db'
 
@@ -47,6 +48,14 @@ export async function getAuth(request: Request, env: Env): Promise<{ user: UserR
   const bearer = readBearer(request)
   if (bearer) {
     const user = await new Db(env.DB).userByApiToken(bearer)
+    return user ? { user, viaToken: true } : null
+  }
+  // an OAuth access token (userId:grantId:secret), for apps that connected the standard way (Codinger)
+  const oauth = /^Bearer\s+([^:\s]+:[^:\s]+:[^:\s]+)$/i.exec(request.headers.get('authorization') ?? '')?.[1]
+  const helpers = (env as Env & { OAUTH_PROVIDER?: OAuthHelpers }).OAUTH_PROVIDER
+  if (oauth && helpers) {
+    const userId = (await helpers.unwrapToken<{ userId: string }>(oauth))?.grant.props.userId
+    const user = userId ? await new Db(env.DB).userById(userId) : null
     return user ? { user, viaToken: true } : null
   }
   const sessionId = readCookie(request, SESSION_COOKIE)
