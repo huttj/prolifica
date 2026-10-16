@@ -17,6 +17,8 @@ export interface Me extends Person {
   storageRequested: boolean
   /** their AI has reached Prolifica's MCP server at least once */
   connected: boolean
+  /** their Codinger has connected to Prolifica (the Ask menu offers it) */
+  codinger: boolean
 }
 
 /** A person as an admin sees them, on the admin page. */

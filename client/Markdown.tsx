@@ -1,16 +1,20 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { imageUrl } from '../shared/images'
+import { Lightbox } from './RichInput'
 
 /**
  * Enough markdown for notes and documents: headings, paragraphs, lists, quotes, fenced code, rules,
  * and inline code, bold, italic and links. Builds React elements (never HTML strings), and only
- * http(s) and mailto links become links, so it is safe for anything people write.
+ * http(s) and mailto links become links, so it is safe for anything people write. Images show
+ * only when they are Prolifica data (pasted into a comment, shared/images.ts): an image from
+ * anywhere else would tell its server who reads the page.
  */
 
 const SAFE_URL = /^(https?:\/\/|mailto:)/i
 
 function inline(text: string, key = 0): ReactNode[] {
   const out: ReactNode[] = []
-  const re = /(`+)([\s\S]*?)\1|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|(?<![\w])_([^_\s][^_]*)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g
+  const re = /(`+)([\s\S]*?)\1|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|(?<![\w])_([^_\s][^_]*)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|!\[[^\]\n]*\]\(\/api\/data\/([a-z0-9]+)\/raw\)/g
   let last = 0
   let m: RegExpExecArray | null
   let n = key
@@ -23,11 +27,22 @@ function inline(text: string, key = 0): ReactNode[] {
     else if (m[7]) {
       const href = m[8]!
       out.push(SAFE_URL.test(href) ? <a key={k} href={href} target="_blank" rel="noreferrer noopener">{inline(m[7], n * 100)}</a> : m[0])
-    } else if (m[9]) out.push(<a key={k} href={m[9]} target="_blank" rel="noreferrer noopener">{m[9]}</a>)
+    } else if (m[10]) out.push(<ZoomImg key={k} src={imageUrl(m[10])} />)
+    else if (m[9]) out.push(<a key={k} href={m[9]} target="_blank" rel="noreferrer noopener">{m[9]}</a>)
     last = m.index + m[0].length
   }
   if (last < text.length) out.push(text.slice(last))
   return out
+}
+
+function ZoomImg({ src }: { src: string }) {
+  const [zoom, setZoom] = useState(false)
+  return (
+    <>
+      <img className="md-img" src={src} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.display = 'none')} onClick={(e) => { e.stopPropagation(); setZoom(true) }} />
+      {zoom && <Lightbox src={src} onClose={() => setZoom(false)} />}
+    </>
+  )
 }
 
 export function Markdown({ text, className }: { text: string; className?: string }) {

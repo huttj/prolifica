@@ -12,6 +12,7 @@ export interface UserRow {
   last_login_at: number | null
   /** last time their AI reached /mcp */
   mcp_seen_at?: number | null
+  codinger_seen_at?: number | null
   /** their own storage limit, overriding the default */
   quota_bytes?: number | null
   /** when they asked for more storage, until an admin sets their limit */
@@ -58,6 +59,10 @@ export class Db {
   constructor(private d1: D1Database) {}
 
   // ---- users ----
+
+  markCodingerSeen(id: string) {
+    return this.d1.prepare('UPDATE users SET codinger_seen_at = ? WHERE id = ?').bind(Date.now(), id).run()
+  }
 
   markMcpSeen(id: string) {
     return this.d1.prepare('UPDATE users SET mcp_seen_at = ? WHERE id = ?').bind(Date.now(), id).run()

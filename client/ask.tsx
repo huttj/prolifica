@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Anchor } from '../shared/types'
+import { forAi } from '../shared/images'
+import { RichInput } from './RichInput'
 import { ConnectSteps } from './Settings'
 import { Icon, Link, Modal, useSession } from './ui'
 
@@ -11,15 +13,22 @@ import { Icon, Link, Modal, useSession } from './ui'
  * person's AI has reached Prolifica once, handing off first shows how to connect it.
  */
 
-export type AiId = 'claude' | 'chatgpt'
-export const AI_LABEL: Record<AiId, string> = { claude: 'Claude', chatgpt: 'ChatGPT' }
+export type AiId = 'claude' | 'chatgpt' | 'codinger'
+export const AI_LABEL: Record<AiId, string> = { claude: 'Claude', chatgpt: 'ChatGPT', codinger: 'Codinger' }
+const AI_IDS = Object.keys(AI_LABEL) as AiId[]
 const LAST_AI_KEY = 'pf:lastAI'
+// Codinger runs on the person's own machine: its New session dialog opens with the prompt in it
+// (they pick the directory and press Create; a link never starts a session there by itself).
+const CODINGER = 'http://localhost:4545'
 
 export function aiUrl(ai: AiId, prompt: string) {
-  return ai === 'claude' ? `https://claude.ai/new?q=${encodeURIComponent(prompt)}` : `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`
+  const q = encodeURIComponent(prompt)
+  return ai === 'claude' ? `https://claude.ai/new?q=${q}` : ai === 'codinger' ? `${CODINGER}/?new&title=${encodeURIComponent('From Prolifica')}&prompt=${q}` : `https://chatgpt.com/?q=${q}`
 }
 
 export function popupAI(url: string) {
+  // Codinger wants a whole window, and one tab for it is enough
+  if (url.startsWith(CODINGER)) return void window.open(url, 'codinger')
   const w = 520
   const h = Math.min(860, (window.screen?.availHeight ?? 900) - 80)
   const left = window.screenX + window.outerWidth - w - 24
@@ -31,7 +40,8 @@ export function popupAI(url: string) {
 export function useLastAi(): [AiId, (ai: AiId) => void] {
   const [ai, setAi] = useState<AiId>(() => {
     try {
-      return localStorage.getItem(LAST_AI_KEY) === 'chatgpt' ? 'chatgpt' : 'claude'
+      const last = localStorage.getItem(LAST_AI_KEY) as AiId | null
+      return last && AI_IDS.includes(last) ? last : 'claude'
     } catch {
       return 'claude'
     }
@@ -44,10 +54,20 @@ export function useLastAi(): [AiId, (ai: AiId) => void] {
       /* storage unavailable */
     }
   }, [])
-  return [ai, choose]
+  // Codinger only for people who have it (their Codinger has connected)
+  const { me } = useSession()
+  return [ai === 'codinger' && !me?.codinger ? 'claude' : ai, choose]
 }
 
 export function AiMark({ ai, size = 13 }: { ai: AiId; size?: number }) {
+  // Codinger's critter, as in its favicon
+  if (ai === 'codinger')
+    return (
+      <svg width={size} height={size} viewBox="0 -1 16 14" shapeRendering="crispEdges" aria-hidden="true">
+        <path fill="#2b98c6" d="M3 3h10v1H3zM2 4h12v5H2zM3 9h10v1H3zM0 6h2v2H0zM14 6h2v2h-2zM4 10h2v2H4zM10 10h2v2h-2z" />
+        <path fill="#222" d="M5 4h1v2H5zM10 4h1v2h-1z" />
+      </svg>
+    )
   return ai === 'claude' ? (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="#D97757" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
       <path d="M8 2v3.2M8 10.8V14M2.8 5l2.8 1.6M10.4 9.4l2.8 1.6M2.8 11l2.8-1.6M10.4 6.6l2.8-1.6" />
@@ -125,7 +145,7 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
     window.addEventListener('pointerdown', close)
     return () => window.removeEventListener('pointerdown', close)
   }, [menu])
-  const other: AiId = ai === 'claude' ? 'chatgpt' : 'claude'
+  const others = AI_IDS.filter((x) => x !== ai && (x !== 'codinger' || me?.codinger))
   return (
     <div ref={root} className="ask">
       <a
@@ -135,7 +155,7 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
         onClick={(e) => {
           e.preventDefault()
           if (disabled) return
-          if (!me?.connected && !saidConnected()) return setGate(true)
+          if (ai !== 'codinger' && !me?.connected && !saidConnected()) return setGate(true)
           go()
         }}
       >
@@ -159,14 +179,17 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
       {menu &&
         createPortal(
           <div ref={menuRef} className="ask-menu card" style={{ right: menu.right, top: menu.top, transform: menu.up ? 'translateY(-100%)' : undefined }}>
-            <button
-              onClick={() => {
-                choose(other)
-                setMenu(null)
-              }}
-            >
-              <AiMark ai={other} /> {label} {AI_LABEL[other]} instead
-            </button>
+            {others.map((other) => (
+              <button
+                key={other}
+                onClick={() => {
+                  choose(other)
+                  setMenu(null)
+                }}
+              >
+                <AiMark ai={other} /> {label} {AI_LABEL[other]} instead
+              </button>
+            ))}
           </div>,
           document.body,
         )}
@@ -218,7 +241,7 @@ export function AskPopover(props: {
     if (picking) return
     const away = (e: PointerEvent) => {
       const t = e.target as Element
-      if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor, .scrim')) onClose()
+      if (!ref.current?.contains(t) && !t.closest?.('.ask-menu, .pop-anchor, .scrim, .lightbox')) onClose()
     }
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('pointerdown', away)
@@ -252,11 +275,11 @@ export function AskPopover(props: {
           ))}
         </div>
       )}
-      <textarea autoFocus className="field" rows={3} placeholder={placeholder} value={want} onChange={(e) => setWant(e.target.value)} />
+      <RichInput autoFocus minRows={3} placeholder={placeholder} value={want} onChange={setWant} />
       <div className="row" style={{ marginTop: 8 }}>
         <AskAiButton
           label={label}
-          prompt={prompt(want.trim())}
+          prompt={prompt(forAi(want.trim()))}
           disabled={!optional && !want.trim()}
           onAsk={() => {
             pieces?.clear()

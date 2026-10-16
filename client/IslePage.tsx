@@ -5,6 +5,7 @@ import { navigate } from './navigate'
 import { AskPopover, useAskTopic } from './ask'
 import { DataModal } from './DataPages'
 import { FoldedMarkdown, Markdown } from './Markdown'
+import { RichInput } from './RichInput'
 import { ThreadView } from './Tree'
 import { UseMyDataModal } from './UseMyData'
 import { EvolutionModal } from './Evolution'
@@ -410,7 +411,7 @@ function Notes(props: {
   const { isle, marks, layer, setLayer, active, setActive, reload, focusEl, focused, setFocused, requireMe, toast } = props
   // clicking a comment (anywhere but its buttons and links) brings its piece up in the isle
   const pick = (root: Mark) => (e: React.MouseEvent) => {
-    if ((e.target as Element).closest('button, a, textarea, input, .emoji-pop')) return
+    if ((e.target as Element).closest('button, a, textarea, input, img, .emoji-pop')) return
     if (!root.anchor) return
     if (focused === root.id) {
       setFocused(null)
@@ -487,15 +488,16 @@ function Notes(props: {
             Replying to {who(replyTo.user)} <button className="btn ghost sm" onClick={() => setReplyTo(null)}>cancel</button>
           </div>
         )}
-        <textarea
-          className="field"
-          placeholder={me ? (active ? 'Say something about this piece' : 'Say something about this isle') : 'Sign in to comment'}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onFocus={() => requireMe()}
-          onKeyDown={(e) => (e.metaKey || e.ctrlKey) && e.key === 'Enter' && send()}
-          rows={3}
-        />
+        <div onFocus={() => requireMe()}>
+          <RichInput
+            placeholder={me ? (active ? 'Say something about this piece' : 'Say something about this isle') : 'Sign in to comment'}
+            value={body}
+            onChange={setBody}
+            onSubmit={send}
+            minRows={3}
+            disabled={!me}
+          />
+        </div>
         <div className="row" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
           <button className="btn primary sm" disabled={busy || !body.trim()} onClick={send}>Comment</button>
         </div>
@@ -580,7 +582,7 @@ function CommentLine({ c, isle, onReply, reload, showAnchor }: { c: Mark; isle: 
           ◎ {c.anchor.label || c.anchor.selector}
         </span>
       )}
-      <div className="body">{c.body}</div>
+      <Markdown className="body" text={c.body ?? ''} />
       <div className="row">
         <CommentReactions
           reactions={c.reactions ?? {}}

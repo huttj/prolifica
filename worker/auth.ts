@@ -58,8 +58,12 @@ export async function getAuth(request: Request, env: Env): Promise<{ user: UserR
   const oauth = /^Bearer\s+([^:\s]+:[^:\s]+:[^:\s]+)$/i.exec(request.headers.get('authorization') ?? '')?.[1]
   const helpers = (env as Env & { OAUTH_PROVIDER?: OAuthHelpers }).OAUTH_PROVIDER
   if (oauth && helpers) {
-    const userId = (await helpers.unwrapToken<{ userId: string }>(oauth))?.grant.props.userId
-    const user = userId ? await new Db(env.DB).userById(userId) : null
+    const grant = (await helpers.unwrapToken<{ userId: string }>(oauth))?.grant
+    const user = grant?.props.userId ? await new Db(env.DB).userById(grant.props.userId) : null
+    // remember that this person has Codinger, for the Ask menu (once a day is plenty)
+    if (user && Date.now() - (user.codinger_seen_at ?? 0) > 24 * 60 * 60 * 1000 && (await helpers.lookupClient(grant!.clientId))?.clientName === 'Codinger') {
+      await new Db(env.DB).markCodingerSeen(user.id)
+    }
     return user ? { user, viaToken: true } : null
   }
   const sessionId = readCookie(request, SESSION_COOKIE)
@@ -93,7 +97,7 @@ export function isIslesHost(request: Request, env: Env) {
 
 export function toMe(env: Env, u: UserRow, usage: number): Me {
   const q = quotaFor(env, u)
-  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, storageRequested: !!u.quota_requested_at, connected: !!u.mcp_seen_at }
+  return { id: u.id, email: u.email, handle: u.handle, name: u.name, bio: u.bio, isAdmin: isAdminEmail(env, u.email), usage, quota: Number.isFinite(q) ? q : null, storageRequested: !!u.quota_requested_at, connected: !!u.mcp_seen_at, codinger: !!u.codinger_seen_at }
 }
 
 /** Bytes a person may keep: their own limit if they have one; admins (the site's own people) get more. */

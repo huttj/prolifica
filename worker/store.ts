@@ -1,4 +1,5 @@
 import { classifyRelation, pageChanges, pageSimilarity, type Relation } from '../shared/relation'
+import { imagesIn } from '../shared/images'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
@@ -422,8 +423,20 @@ export class Store {
 
   async getDataset(id: string): Promise<{ dataset: Dataset; row: DatasetRow }> {
     const row = await this.datasetRow(id)
-    if (!row || !this.canReadDataset(row)) fail(404, `No data with id ${id} that you can see`)
+    if (!row || !(this.canReadDataset(row) || (await this.inVisibleComment(id)))) fail(404, `No data with id ${id} that you can see`)
     return { dataset: await this.toDataset(row!), row: row! }
+  }
+
+  /** Images pasted into a comment can be seen by whoever can see the comment. */
+  private async inVisibleComment(id: string): Promise<boolean> {
+    const hit = await this.d1
+      .prepare(
+        `SELECT 1 AS x FROM mark_data md JOIN marks m ON m.id = md.mark_id JOIN isles i ON i.id = m.isle_id
+         WHERE md.dataset_id = ? AND m.deleted_at IS NULL AND i.deleted_at IS NULL AND (i.visibility != 'private' OR i.owner_id = ?) LIMIT 1`,
+      )
+      .bind(id, this.viewer?.id ?? '')
+      .first()
+    return !!hit
   }
 
   async listDatasets(opts: { ownerId?: string; folder?: string; limit?: number } = {}): Promise<Dataset[]> {
@@ -1678,6 +1691,15 @@ export class Store {
       .prepare(`INSERT INTO marks (id, user_id, isle_id, anchor_key, anchor, snippet, kind, body, parent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'comment', ?, ?, ?, ?)`)
       .bind(id, me.id, isleId, anchorKeyOf(anchor), anchor ? JSON.stringify(anchor) : null, opts.snippet?.slice(0, MAX_SNIPPET) ?? null, text, parentId, now, now)
       .run()
+    // only the commenter's own data: naming someone else's private data must not show it
+    const images = imagesIn(text)
+    if (images.length) {
+      const { results: own } = await this.d1
+        .prepare(`SELECT id FROM datasets WHERE owner_id = ? AND deleted_at IS NULL AND id IN (${images.map(() => '?').join(',')})`)
+        .bind(me.id, ...images)
+        .all<{ id: string }>()
+      if (own.length) await this.d1.batch(own.map((d) => this.d1.prepare('INSERT OR IGNORE INTO mark_data (mark_id, dataset_id) VALUES (?, ?)').bind(id, d.id)))
+    }
     return this.toMark((await this.d1.prepare('SELECT * FROM marks WHERE id = ?').bind(id).first<MarkRow>())!)
   }
 

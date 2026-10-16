@@ -1,5 +1,6 @@
 import { COLLECTION_METHODS, type Anchor, type DataSource, type IsleSummary, type SlotSpec, type Visibility } from '../shared/types'
 import { familyOffers } from '../shared/features'
+import { imagesIn } from '../shared/images'
 import { appOrigin, islesOrigin, quotaFor } from './auth'
 import { checkIsle, shootLater } from './shots'
 import { applyJsonSets, applyTextEdits, EditError, grepLines, type TextEdit } from '../shared/edits'
@@ -210,7 +211,14 @@ and lean on those pieces: they are their go-tos.
 ## Marks
 star and comment take an optional selector to mark one element instead of the page. Emoji
 reactions go on comments only (react takes a comment id). Comments come in layers (mine,
-author, following, everyone) so busy isles stay quiet.`
+author, following, everyone) so busy isles stay quiet.
+
+## Images in comments and asks
+People paste images into comments and into what they ask you. Each is their image data (in
+pasted/), written in the text as ![image](/api/data/<id>/raw); comments() lists them per comment
+as images. Look at one with read_data(id): you get the picture itself. To show an image in a
+comment of yours, upload it as data and put the same link in the body; whoever can see the
+comment can then see it, and the data stays private otherwise.`
 
 const s = (description: string, extra: Record<string, unknown> = {}) => ({ type: 'string', description, ...extra })
 const obj = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', properties, required, additionalProperties: false })
@@ -1155,7 +1163,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       return text({
         elements: r.tallies.map((t) => ({ selector: t.anchorKey || null, label: t.anchor?.label ?? null, stars: t.stars, comments: t.comments })),
         comments: r.comments.map((c) => ({
-          id: c.id, by: c.user.handle, selector: c.anchorKey || null, body: c.body, reply_to: c.parentId, at: new Date(c.createdAt).toISOString(),
+          id: c.id, by: c.user.handle, selector: c.anchorKey || null, body: c.body, images: imagesIn(c.body ?? ''), reply_to: c.parentId, at: new Date(c.createdAt).toISOString(),
           reactions: Object.fromEntries(Object.entries(c.reactions ?? {}).map(([e, x]) => [e, x.count])),
         })),
         hidden_in_other_layers: r.layers.everyone - r.comments.length,
