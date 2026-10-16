@@ -59,6 +59,8 @@ make here is public by default and can be remixed by anyone.
   (what's in and what was left out) and code: the bookmarklet, scraper or script itself, in
   full, so anyone can collect more the same way. If you scraped it, the code you ran is the
   code. Data gathered by identical code is linked up automatically.
+- Files on disk (when you have a shell): ask api_key for a 30-minute key and send them with curl,
+  rather than pasting big contents into write_data.
 - To look at something on the web (the images in a thread, a page, a JSON file), use fetch_url: it
   runs on the server, images come back as images, up to 10 at a time. save_as keeps one as data with
   its source. Your own sandbox may not reach the web; fetch_url does.
@@ -276,6 +278,12 @@ const TOOLS = [
     description: 'How Prolifica works for agents: data, isles (pages with data slots), remixing, marks. Read this once before making or remixing isles.',
     inputSchema: obj({}),
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: 'api_key',
+    description:
+      'A key that lasts 30 minutes, for an agent with a shell (Claude Code, Codinger) to send files from disk with curl instead of putting their contents in a tool call. It acts as the person on /api. Returns the key and the curl commands.',
+    inputSchema: obj({ for: s('What it is for, e.g. "upload the scraped tweets"') }),
   },
   {
     name: 'whoami',
@@ -649,6 +657,24 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
   switch (name) {
     case 'guide':
       return text(GUIDE)
+
+    case 'api_key': {
+      const db = new Db(env.DB)
+      if ((await db.liveShortTokens(user.id)) >= 10) throw new StoreError(429, 'Ten short-lived keys are live already; use one of them, or wait for some to expire')
+      const { token, expiresAt } = await db.createApiToken(user.id, `30 min: ${String(args.for ?? 'an agent').slice(0, 80)}`, 30 * 60 * 1000)
+      const auth = `-H "authorization: Bearer ${token}"`
+      return text({
+        key: token,
+        expires_at: new Date(expiresAt!).toISOString(),
+        curl: {
+          upload: `curl -s ${auth} -H "content-type: text/csv" --data-binary @rows.csv "${app}/api/data?path=folder/rows.csv"`,
+          replace_contents: `curl -s -X PUT ${auth} --data-binary @rows.csv "${app}/api/data/<data id>/content"`,
+          describe_or_move: `curl -s -X PATCH ${auth} -H "content-type: application/json" -d '{"path":"new/path.csv","description":"..."}' "${app}/api/data/<data id>"`,
+          publish: `curl -s ${auth} -H "content-type: application/json" -d @isle.json "${app}/api/isles"  # isle.json: the publish_isle arguments (html, title, slots, bindings, id to update, ...)`,
+        },
+        note: 'Set content-type to the file\'s type (image/png, application/json, text/markdown, ...). Keep the key out of files you save or publish.',
+      })
+    }
 
     case 'whoami': {
       const { bytes } = await store.usage(user.id)

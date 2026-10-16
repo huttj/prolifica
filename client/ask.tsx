@@ -4,6 +4,7 @@ import type { Anchor } from '../shared/types'
 import { forAi } from '../shared/images'
 import { RichInput } from './RichInput'
 import { ConnectSteps } from './Settings'
+import { CODINGER_URL, codingerAt, setCodingerAt, type CodingerAt } from './prefs'
 import { Icon, Link, Modal, useSession } from './ui'
 
 /**
@@ -17,18 +18,24 @@ export type AiId = 'claude' | 'chatgpt' | 'codinger'
 export const AI_LABEL: Record<AiId, string> = { claude: 'Claude', chatgpt: 'ChatGPT', codinger: 'Codinger' }
 const AI_IDS = Object.keys(AI_LABEL) as AiId[]
 const LAST_AI_KEY = 'pf:lastAI'
-// Codinger runs on the person's own machine: its New session dialog opens with the prompt in it
-// (they pick the directory and press Create; a link never starts a session there by itself).
-const CODINGER = 'http://localhost:4545'
+// Codinger runs on the person's own machine (or through web.codinger.app; Settings, prefs.ts): its
+// New session dialog opens with the prompt in it. They pick the directory and press Create; a link
+// never starts a session there by itself.
+const CODINGER_FIRST = `You're in Codinger, on my machine. If this is about changing an isle, work on it locally first: \
+pull it down into a Codinger artifact (get_isle for its page and instructions, read_data for each bound slot) in \
+~/.codinger/artifacts/<name>/, with "parent": "<isle id>" in artifact.json, show it with show_artifact, and iterate \
+there. Don't publish anything to Prolifica until I say so; then update the isle in place (publish_isle with its id) \
+unless I ask for a new one. This comes before anything below about publishing.`
 
 export function aiUrl(ai: AiId, prompt: string) {
   const q = encodeURIComponent(prompt)
-  return ai === 'claude' ? `https://claude.ai/new?q=${q}` : ai === 'codinger' ? `${CODINGER}/?new&title=${encodeURIComponent('From Prolifica')}&prompt=${q}` : `https://chatgpt.com/?q=${q}`
+  if (ai === 'codinger') return `${CODINGER_URL[codingerAt() ?? 'web']}/?new&title=${encodeURIComponent('From Prolifica')}&prompt=${encodeURIComponent(`${CODINGER_FIRST}\n\n${prompt}`)}`
+  return ai === 'claude' ? `https://claude.ai/new?q=${q}` : `https://chatgpt.com/?q=${q}`
 }
 
 export function popupAI(url: string) {
   // Codinger wants a whole window, and one tab for it is enough
-  if (url.startsWith(CODINGER)) return void window.open(url, 'codinger')
+  if (Object.values(CODINGER_URL).some((c) => url.startsWith(c))) return void window.open(url, 'codinger')
   const w = 520
   const h = Math.min(860, (window.screen?.availHeight ?? 900) - 80)
   const left = window.screenX + window.outerWidth - w - 24
@@ -124,12 +131,31 @@ function ConnectFirst({ ai, onGo, onClose }: { ai: AiId; onGo: () => void; onClo
   )
 }
 
+/** The first Ask in Codinger: where does it run? The answer stays in this browser (Settings changes it). */
+function WhereCodinger({ onPick, onClose }: { onPick: (at: CodingerAt) => void; onClose: () => void }) {
+  return (
+    <Modal onClose={onClose}>
+      <h2>Where does Codinger run?</h2>
+      <div className="row" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn primary" onClick={() => onPick('web')}>
+          <AiMark ai="codinger" /> web.codinger.app
+        </button>
+        <button className="btn" onClick={() => onPick('local')}>
+          <AiMark ai="codinger" /> This computer (localhost:4545)
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 /** "Ask Claude" with a caret to switch AI. */
 export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt: string; disabled?: boolean; onAsk?: () => void; label?: string }) {
   const [ai, choose] = useLastAi()
   const { me } = useSession()
   const [gate, setGate] = useState(false)
+  const [where, setWhere] = useState(false)
   const go = () => {
+    if (ai === 'codinger' && !codingerAt()) return setWhere(true)
     popupAI(aiUrl(ai, prompt))
     onAsk?.()
   }
@@ -191,6 +217,18 @@ export function AskAiButton({ prompt, disabled, onAsk, label = 'Ask' }: { prompt
               </button>
             ))}
           </div>,
+          document.body,
+        )}
+      {where &&
+        createPortal(
+          <WhereCodinger
+            onClose={() => setWhere(false)}
+            onPick={(at) => {
+              setCodingerAt(at)
+              setWhere(false)
+              go()
+            }}
+          />,
           document.body,
         )}
       {gate &&

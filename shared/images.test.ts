@@ -16,8 +16,8 @@ describe('images in text', () => {
     expect(imagesIn('![x](https://evil.example/a.png) ![y](/api/data/../me/raw)')).toEqual([])
   })
 
-  it('numbers images for an AI that reads text only', () => {
-    expect(forAi(text)).toBe('look [image 1] and [image 2] then [image 1]\n\n(The images are Prolifica data; look at each with read_data: image 1 is abc123, image 2 is zz9.)')
+  it('names each image by its data id for an AI that reads text only', () => {
+    expect(forAi(text)).toBe('look [image abc123] and [image zz9] then [image abc123]\n\n(Each [image <id>] is Prolifica data: look at it with read_data.)')
     expect(forAi('no pictures')).toBe('no pictures')
   })
 })

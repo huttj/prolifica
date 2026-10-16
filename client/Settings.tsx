@@ -4,6 +4,7 @@ import { ago, api } from './api'
 import { AI_LABEL, AiMark, type AiId } from './ask'
 import { UsageBar } from './DataPages'
 import { navigate } from './navigate'
+import { codingerAt, IMAGE_SIDE, imageSize, setCodingerAt, setImageSize, type CodingerAt, type ImageSize } from './prefs'
 import { CopyBlock, Link, Modal, useAsync, useSession } from './ui'
 
 const mcpUrl = () => `${location.origin}/mcp`
@@ -120,6 +121,34 @@ export function Connect() {
   )
 }
 
+/** Choices kept in this browser (prefs.ts). */
+function BrowserPrefs({ codinger }: { codinger: boolean }) {
+  const [at, setAt] = useState(codingerAt() ?? 'web')
+  const [size, setSize] = useState(imageSize())
+  return (
+    <div className="section">
+      <h2>This browser</h2>
+      <div className="card pad">
+        <label className="lbl">Pasted images</label>
+        <select className="field" style={{ maxWidth: 260 }} value={size} onChange={(e) => { const v = e.target.value as ImageSize; setImageSize(v); setSize(v) }}>
+          <option value="small">Small ({IMAGE_SIDE.small} px)</option>
+          <option value="medium">Medium ({IMAGE_SIDE.medium} px)</option>
+          <option value="large">Large ({IMAGE_SIDE.large} px)</option>
+        </select>
+        {codinger && (
+          <>
+            <label className="lbl">Codinger</label>
+            <select className="field" style={{ maxWidth: 260 }} value={at} onChange={(e) => { const v = e.target.value as CodingerAt; setCodingerAt(v); setAt(v) }}>
+              <option value="web">web.codinger.app</option>
+              <option value="local">This computer (localhost:4545)</option>
+            </select>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function Settings() {
   const { me, loading, refresh, toast } = useSession()
   const [handle, setHandle] = useState(me?.handle ?? '')
@@ -169,6 +198,8 @@ export function Settings() {
         <h2>Storage</h2>
         <UsageBar />
       </div>
+
+      <BrowserPrefs codinger={me.codinger} />
 
       <div className="section">
         <h2>Connect an agent</h2>

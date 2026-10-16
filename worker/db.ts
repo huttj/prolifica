@@ -139,21 +139,31 @@ export class Db {
   // ---- personal keys ----
 
   /** Mints a key; the secret is returned once and only its hash is kept. */
-  async createApiToken(userId: string, label: string): Promise<{ token: string; row: ApiToken }> {
+  /** ttlMs: a short-lived key, which stops working by itself (and is not listed in Settings). */
+  async createApiToken(userId: string, label: string, ttlMs?: number): Promise<{ token: string; row: ApiToken; expiresAt: number | null }> {
     const token = `${TOKEN_PREFIX}${randomId(24)}`
     const hash = await sha256(token)
     const now = Date.now()
     const prefix = token.slice(0, 9)
+    const expiresAt = ttlMs ? now + ttlMs : null
+    // expired keys go when new ones come
+    if (ttlMs) await this.d1.prepare('DELETE FROM api_tokens WHERE user_id = ? AND expires_at < ?').bind(userId, now).run()
     await this.d1
-      .prepare('INSERT INTO api_tokens (token_hash, user_id, label, prefix, created_at) VALUES (?, ?, ?, ?, ?)')
-      .bind(hash, userId, label, prefix, now)
+      .prepare('INSERT INTO api_tokens (token_hash, user_id, label, prefix, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(hash, userId, label, prefix, now, expiresAt)
       .run()
-    return { token, row: { id: hash, label, prefix, createdAt: now, lastUsedAt: null } }
+    return { token, row: { id: hash, label, prefix, createdAt: now, lastUsedAt: null }, expiresAt }
+  }
+
+  /** How many short-lived keys someone holds that still work. */
+  async liveShortTokens(userId: string): Promise<number> {
+    const r = await this.d1.prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?').bind(userId, Date.now()).first<{ n: number }>()
+    return r?.n ?? 0
   }
 
   async listApiTokens(userId: string): Promise<ApiToken[]> {
     const { results } = await this.d1
-      .prepare('SELECT token_hash, label, prefix, created_at, last_used_at FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+      .prepare('SELECT token_hash, label, prefix, created_at, last_used_at FROM api_tokens WHERE user_id = ? AND revoked_at IS NULL AND expires_at IS NULL ORDER BY created_at DESC')
       .bind(userId)
       .all<{ token_hash: string; label: string; prefix: string; created_at: number; last_used_at: number | null }>()
     return results.map((r) => ({ id: r.token_hash, label: r.label, prefix: r.prefix, createdAt: r.created_at, lastUsedAt: r.last_used_at }))
@@ -168,8 +178,8 @@ export class Db {
   async userByApiToken(token: string): Promise<UserRow | null> {
     const hash = await sha256(token)
     const row = await this.d1
-      .prepare('SELECT u.*, t.last_used_at AS token_used_at FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND t.revoked_at IS NULL')
-      .bind(hash)
+      .prepare('SELECT u.*, t.last_used_at AS token_used_at FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.token_hash = ? AND t.revoked_at IS NULL AND (t.expires_at IS NULL OR t.expires_at > ?)')
+      .bind(hash, Date.now())
       .first<UserRow & { token_used_at: number | null }>()
     if (!row) return null
     const { token_used_at, ...user } = row

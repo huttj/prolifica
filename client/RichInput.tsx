@@ -9,6 +9,7 @@ import { api } from './api'
 import { htmlToMarkdown } from './htmlmd'
 import { activate, enterKey, fromDom, imageCaret, imgNode, rangeAt, render, select, selectionOffsets, snapCaret, wrapKey } from './mdlive'
 import { imageUrl } from '../shared/images'
+import { IMAGE_SIDE, imageSize } from './prefs'
 import { Icon, useSession } from './ui'
 
 type Props = {
@@ -38,29 +39,30 @@ function caretAt(x: number, y: number): Range | null {
 
 export const imagesFrom = (dt: DataTransfer | null): File[] => [...(dt?.files ?? [])].filter((f) => f.type.startsWith('image/'))
 
-// Pasted images become the person's data. Big ones shrink first: Claude downsamples anything past
-// ~1568px anyway, read_data hands over images up to 1 MB, and storage is a few MB.
-const MAX_SIDE = 1568
+// Pasted images become the person's data, as WebP (JPEG where the browser can't write WebP), no
+// longer on their longest side than the size chosen in Settings (1024px unless changed): Claude
+// downsamples past ~1568px anyway, read_data hands over images up to 1 MB, and storage is a few MB.
 const MAX_BYTES = 900_000
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' }
 
 export async function uploadImage(file: Blob): Promise<string> {
   let blob = file
+  // a GIF stays as it is, so it keeps moving
   const bmp = file.type === 'image/gif' ? null : await createImageBitmap(file).catch(() => null)
-  if (bmp && (Math.max(bmp.width, bmp.height) > MAX_SIDE || file.size > MAX_BYTES || !EXT[file.type])) {
-    // a PNG stays a PNG if it fits; past that, JPEG at falling quality, then smaller
-    let scale = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height))
-    let type = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
-    let quality = 0.88
+  if (bmp) {
+    let scale = Math.min(1, IMAGE_SIDE[imageSize()] / Math.max(bmp.width, bmp.height))
+    let quality = 0.8
     for (;;) {
       const canvas = new OffscreenCanvas(Math.round(bmp.width * scale), Math.round(bmp.height * scale))
       canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height)
-      blob = await canvas.convertToBlob({ type, quality })
+      blob = await canvas.convertToBlob({ type: 'image/webp', quality })
+      if (blob.type !== 'image/webp') blob = await canvas.convertToBlob({ type: 'image/jpeg', quality })
       if (blob.size <= MAX_BYTES || scale < 0.2) break
-      if (type === 'image/png') type = 'image/jpeg'
-      else if (quality > 0.6) quality -= 0.14
+      if (quality > 0.55) quality -= 0.125
       else scale *= 0.75
     }
+    // a small image that was already smaller as it came stays as it came
+    if (scale === 1 && file.size <= blob.size && EXT[file.type] && Math.max(bmp.width, bmp.height) <= IMAGE_SIDE[imageSize()]) blob = file
   }
   if (!EXT[blob.type]) throw new Error('Use a PNG, JPEG, GIF or WebP image')
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('')

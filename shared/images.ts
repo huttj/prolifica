@@ -23,10 +23,8 @@ export function splitImages(text: string): ({ text: string } | { id: string })[]
 /** The ids of the images in a text, in order, once each. */
 export const imagesIn = (text: string) => [...new Set([...text.matchAll(TOKEN)].map((m) => m[1]))]
 
-/** The text for an AI that reads text only: each image becomes a numbered pointer to its data. */
+/** The text for an AI that reads text only: each image becomes its data id, to look at with read_data. */
 export function forAi(text: string): string {
-  const ids = imagesIn(text)
-  if (!ids.length) return text
-  const body = text.replace(TOKEN, (_, id: string) => `[image ${ids.indexOf(id) + 1}]`)
-  return `${body}\n\n(The images are Prolifica data; look at each with read_data: ${ids.map((id, i) => `image ${i + 1} is ${id}`).join(', ')}.)`
+  if (!imagesIn(text).length) return text
+  return `${text.replace(TOKEN, (_, id: string) => `[image ${id}]`)}\n\n(Each [image <id>] is Prolifica data: look at it with read_data.)`
 }
