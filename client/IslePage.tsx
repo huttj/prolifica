@@ -696,6 +696,7 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
           <FoldedMarkdown text={isle.description} lines={6} />
         </div>
       )}
+      <DataSources isle={isle} />
       <div>
         <div className="small muted" style={{ fontWeight: 600, marginBottom: 6 }}>Data it shows</div>
         {data.length === 0 && <p className="small muted" style={{ margin: 0 }}>This isle reads no data.</p>}
@@ -714,7 +715,6 @@ function DataTab({ isle, onUseData }: { isle: Isle; onUseData: () => void }) {
           <div><button className="btn primary sm" onClick={onUseData}><Icon name="data" /> Use my data…</button></div>
         </div>
       )}
-      <DataSources isle={isle} />
       {isle.instructions && (
         <details className="isle-instructions">
           <summary>Instructions for agents</summary>

@@ -4,6 +4,7 @@ import { ago, api, fmtBytes, who } from './api'
 import { AskPopoverButton } from './ask'
 import { FoldedMarkdown } from './Markdown'
 import { navigate } from './navigate'
+import { BookmarkletLink, isBookmarklet } from './Sources'
 import { CopyBlock, ErrorBox, Icon, IsleCard, Link, useAsync, useSession } from './ui'
 
 export function SitesIndex() {
@@ -68,7 +69,7 @@ function readable(code: string) {
   }
 }
 
-function Collector({ c, rank }: { c: SiteCollector; rank: number }) {
+function Collector({ c, rank, site }: { c: SiteCollector; rank: number; site: string }) {
   const [open, setOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
   const code = useAsync(() => (open ? api.collector(c.hash) : Promise.resolve(null)), [open, c.hash])
@@ -87,7 +88,9 @@ function Collector({ c, rank }: { c: SiteCollector; rank: number }) {
           gathered {c.uses} dataset{c.uses === 1 ? '' : 's'} · {c.people} {c.people === 1 ? 'person' : 'people'} · {ago(c.lastUsed)}
         </span>
       </div>
-      {how && <p className="small" style={{ margin: '6px 0 0' }}>{how}</p>}
+      {isBookmarklet(method, c.language) ? (
+        <div style={{ marginTop: 8 }}><BookmarkletLink hash={c.hash} site={site} by={c.example.owner} /></div>
+      ) : how && <p className="small" style={{ margin: '6px 0 0' }}>{how}</p>}
       <div className="row small" style={{ marginTop: 8 }}>
         <span className="muted">e.g.</span> <Link to={`/d/${c.example.id}`}>{c.example.path}</Link> <span className="muted">by {who(c.example.owner)}</span>
         <span className="grow" />
@@ -152,7 +155,7 @@ export function SitePage({ site }: { site: string }) {
         {s.collectors.length === 0 ? (
           <p className="muted small">No one has shared the code they used here yet.</p>
         ) : (
-          <div className="stack">{s.collectors.map((c, k) => <Collector key={c.hash} c={c} rank={k} />)}</div>
+          <div className="stack">{s.collectors.map((c, k) => <Collector key={c.hash} c={c} rank={k} site={s.site} />)}</div>
         )}
         <div className="row" style={{ marginTop: 12 }}>
           <AskPopoverButton

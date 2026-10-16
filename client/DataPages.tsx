@@ -9,6 +9,7 @@ import { navigate } from './navigate'
 import { AskPopoverButton, useAskTopic } from './ask'
 import { DataTree } from './DataTree'
 import { ThreadView } from './Tree'
+import { BookmarkletLink, isBookmarklet } from './Sources'
 import { ErrorBox, Icon, Link, Modal, PersonLink, useAsync, useSession } from './ui'
 
 export function UsageBar() {
@@ -413,7 +414,8 @@ function Provenance({ dataset, mine, onChanged }: { dataset: Dataset; mine: bool
           {src.code && (
             <>
               <span className="muted">Collector</span>
-              <span>
+              <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                {isBookmarklet(src.method, src.code.language) && <BookmarkletLink hash={src.code.hash} site={src.url ? siteOf(src.url) : null} by={dataset.owner} />}
                 <button className="btn sm" onClick={() => setShowCode((v) => !v)}>
                   <Icon name="code" /> {showCode ? 'Hide' : 'Show'} code{src.code.language ? ` · ${src.code.language}` : ''} · {fmtBytes(src.code.size)}
                 </button>

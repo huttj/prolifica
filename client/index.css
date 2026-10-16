@@ -687,6 +687,7 @@ a.isle-name:hover, button.isle-name:hover { text-decoration-style: solid; }
 .src-notes p { margin: 4px 0 0; white-space: pre-wrap; color: var(--ink-2); max-height: 160px; overflow: auto; }
 .src-collector { margin-top: 8px; padding: 9px 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--line-2); }
 .bookmarklet { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 650; font-size: 13px; text-decoration: none; cursor: grab; white-space: nowrap; }
+.bm-link { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .src-code { margin: 8px 0 0; max-height: 220px; overflow: auto; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
 
 /* ---- RichInput (client/RichInput.tsx, from Codinger): live markdown with pasted images ---- */

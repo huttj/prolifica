@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { COLLECTION_METHODS, type DatasetRef, type Isle, type IsleSource } from '../shared/types'
+import { COLLECTION_METHODS, type CollectionMethod, type DatasetRef, type Isle, type IsleSource, type Person } from '../shared/types'
 import { ago, api, who } from './api'
 import { Icon, Link, useAsync, useSession } from './ui'
 
@@ -30,6 +30,35 @@ function groupSources(sources: IsleSource[]): SourceGroup[] {
   })
 }
 
+/** Saved as a bookmarklet: by its method or language, or by the code itself. */
+export const isBookmarklet = (method: CollectionMethod | null | undefined, language: string | null | undefined) =>
+  method === 'bookmarklet' || /bookmarklet/i.test(language ?? '')
+
+/**
+ * A bookmarklet as a button to drag to the bookmarks bar, shown wherever its data is, so getting it takes
+ * no digging. Someone else's says it runs as you, and whose it is.
+ */
+export function BookmarkletLink({ hash, site, by }: { hash: string; site: string | null; by: Person }) {
+  const { me, toast } = useSession()
+  const code = useAsync(() => api.collector(hash), [hash])
+  const link = useRef<HTMLAnchorElement>(null)
+  const raw = (code.data ?? '').trim()
+  const href = !raw ? '' : /^javascript:/i.test(raw) ? raw : `javascript:${encodeURIComponent(raw)}`
+  // React won't render a javascript: href, so it's set on the element directly
+  useEffect(() => {
+    if (link.current && href) link.current.setAttribute('href', href)
+  }, [href])
+  if (!href) return null
+  return (
+    <span className="bm-link">
+      <a ref={link} className="bookmarklet" data-pid="bookmarklet" draggable onClick={(e) => { e.preventDefault(); toast(`Drag it to your bookmarks bar, then click it on ${site ?? 'the page you want'}`) }}>
+        <Icon name="data" /> {site ? `Collect from ${site}` : 'Collector'}
+      </a>
+      {me?.id !== by.id && <span className="tiny muted">runs{site ? ` on ${site}` : ''} as you · saved by {who(by)}</span>}
+    </span>
+  )
+}
+
 export function DataSources({ isle, compact = false }: { isle: Isle; compact?: boolean }) {
   const src = useAsync(() => api.isleSources(isle.id), [isle.id, isle.version])
   if (src.error || !src.data || !src.data.sources.length) return null
@@ -51,6 +80,7 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
   const [open, setOpen] = useState(false)
   const owners = [...new Map(g.datasets.map((d) => [d.owner.id, d.owner])).values()]
   const how = s.method ? COLLECTION_METHODS[s.method] : 'Unknown method'
+  const bm = !!s.code && s.selfServe && isBookmarklet(s.method, s.code.language)
   return (
     <div className={`src-card ${s.selfServe ? 'self' : ''}`}>
       <div className="row" style={{ gap: 6 }}>
@@ -85,10 +115,11 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
           <p className="tiny">{s.notes}</p>
         </details>
       )}
+      {bm && <div style={{ marginTop: 8 }}><BookmarkletLink hash={s.code!.hash} site={s.site} by={s.dataset.owner} /></div>}
       <div className="row" style={{ marginTop: 6, gap: 6 }}>
         {s.code && (
-          <button className={`btn sm ${s.selfServe ? 'primary' : ''}`} onClick={() => setOpen((o) => !o)}>
-            {open ? 'Hide' : s.selfServe ? `Get the ${s.method === 'bookmarklet' || /bookmarklet/i.test(s.code.language ?? '') ? 'bookmarklet' : s.method ?? 'collector'}` : 'See the collector'}
+          <button className={`btn sm ${s.selfServe && !bm ? 'primary' : ''}`} onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide' : bm ? 'Look at the code' : s.selfServe ? `Get the ${s.method ?? 'collector'}` : 'See the collector'}
           </button>
         )}
         {site && (
@@ -97,23 +128,23 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
           </Link>
         )}
       </div>
-      {open && s.code && <Collector s={s} />}
+      {open && s.code && <Collector s={s} linked={bm} />}
     </div>
   )
 }
 
 /** The collector itself: a bookmarklet you can drag to the bookmarks bar, or code to copy and read. */
-function Collector({ s }: { s: IsleSource }) {
+function Collector({ s, linked }: { s: IsleSource; linked: boolean }) {
   const { toast } = useSession()
   const code = useAsync(() => api.collector(s.code!.hash), [s.code!.hash])
   const [showCode, setShowCode] = useState(false)
   const link = useRef<HTMLAnchorElement>(null)
   const text = code.data ?? ''
-  const isBookmarklet = /^\s*javascript:/i.test(text)
+  const isJs = /^\s*javascript:/i.test(text)
   // React won't render a javascript: href, so it's set on the element directly (only for a bookmarklet)
   useEffect(() => {
-    if (link.current && isBookmarklet) link.current.setAttribute('href', text.trim())
-  }, [isBookmarklet, text])
+    if (link.current && isJs) link.current.setAttribute('href', text.trim())
+  }, [isJs, text])
   if (code.error) return <p className="tiny err">Couldn't load the collector.</p>
   if (!code.data) return <p className="tiny muted">Loading the collector…</p>
   return (
@@ -121,7 +152,7 @@ function Collector({ s }: { s: IsleSource }) {
       <p className="tiny" style={{ margin: 0 }}>
         <b>This runs code{s.site ? ` on ${s.site}` : ''} as you.</b> It was saved by {who(s.dataset.owner)}; only use it if you trust them, and look it over first.
       </p>
-      {isBookmarklet ? (
+      {linked ? null : isJs ? (
         <div className="row" style={{ marginTop: 8, gap: 8 }}>
           <a ref={link} className="bookmarklet" onClick={(e) => { e.preventDefault(); toast('Drag it to your bookmarks bar, then click it on the page you want') }} draggable>
             <Icon name="data" /> {s.site ? `Collect from ${s.site}` : 'Collector'}
@@ -138,7 +169,7 @@ function Collector({ s }: { s: IsleSource }) {
         <button className="btn sm" onClick={() => navigator.clipboard.writeText(text).then(() => toast('Copied'), () => toast("Couldn't copy"))}>Copy</button>
         <span className="tiny muted">{s.code!.language ?? 'code'} · {Math.round(s.code!.size / 1024)} KB</span>
       </div>
-      {showCode && <pre className="src-code">{isBookmarklet ? safeDecode(text) : text}</pre>}
+      {showCode && <pre className="src-code">{isJs ? safeDecode(text) : text}</pre>}
     </div>
   )
 }
