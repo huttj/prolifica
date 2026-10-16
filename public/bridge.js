@@ -402,6 +402,21 @@
     return
   }
   setInterval(placePins, 800)
+  // when the page changes its own hash (it can store a view there, e.g. cohorts), send the hash to the app,
+  // so that the app's URL opens the same view; leave out #focus, which the app sets
+  let lastHash = location.hash
+  const hashOut = () => {
+    if (location.hash === lastHash) return
+    lastHash = location.hash
+    let h = location.hash.slice(1)
+    if (/(^|&)focus=/.test(h)) { const p = new URLSearchParams(h); p.delete('focus'); h = p.toString() }
+    send({ t: 'hash', hash: h ? '#' + h : '' })
+  }
+  for (const k of ['pushState', 'replaceState']) {
+    const f = history[k]
+    history[k] = function (...args) { const r = f.apply(this, args); hashOut(); return r }
+  }
+  addEventListener('hashchange', hashOut)
   addEventListener('click', remember, true)
   addEventListener('change', remember, true)
   // a ring stays until the reader clicks somewhere in the isle

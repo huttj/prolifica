@@ -63,13 +63,16 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   const frame = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
 
+  // add the hash of the app's URL to the frame's URL (an isle can store a view there, e.g. cohorts); read it
+  // once per isle, so the frame does not reload when the isle later sends a new hash; #c-<id> is a comment link
+  const startHash = useMemo(() => (/^#c-/.test(location.hash) ? '' : location.hash), [id])
   const frameSrc = useMemo(() => {
     if (!isle.data) return ''
-    if (!viewing || viewing.current) return isle.data.frameUrl
+    if (!viewing || viewing.current) return isle.data.frameUrl + startHash
     const u = new URL(isle.data.frameUrl)
     u.searchParams.set('v', String(viewing.version))
-    return u.toString()
-  }, [isle.data, viewing])
+    return u.toString() + startHash
+  }, [isle.data, viewing, startHash])
   // the frame keeps showing the page it had until the new one has loaded: hide it in between, so a new
   // header never sits over the last isle's page
   const [painted, setPainted] = useState(false)
@@ -131,7 +134,7 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
   useEffect(() => {
     const on = (e: MessageEvent) => {
       if (e.origin !== frameOrigin || e.source !== frame.current?.contentWindow) return
-      const m = e.data as { prolifica?: number; t?: string; anchor?: Anchor; snippet?: string; key?: string }
+      const m = e.data as { prolifica?: number; t?: string; anchor?: Anchor; snippet?: string; key?: string; hash?: string }
       if (!m?.prolifica) return
       if (m.t === 'ready') {
         setReady(true)
@@ -147,6 +150,9 @@ export function IslePage({ id, family = false }: { id: string; family?: boolean 
           setTab('notes')
         }
       }
+      // the isle changed its own hash: put it in the app's URL (unless the URL holds a comment link)
+      if (m.t === 'hash' && typeof m.hash === 'string' && m.hash.length < 16000 && (m.hash === '' || m.hash.startsWith('#')) && !/^#c-/.test(location.hash))
+        history.replaceState(history.state, '', location.pathname + location.search + m.hash)
       if (m.t === 'pickCancel') setPicking(false)
       if (m.t === 'unfocused') setFocusedComment(null)
       if (m.t === 'open' && m.key) {
