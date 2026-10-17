@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EditError } from './edits'
-import { runExpression } from './transform'
+import { LIMITS, runExpression } from './transform'
 
 const thread = {
   messages: [
@@ -34,6 +33,6 @@ describe('runExpression', () => {
   it('explains a syntax error', async () => expect(runExpression('messages[', thread)).rejects.toThrow(/JSONata/))
   it('says when nothing matched', async () => expect(runExpression('posts', thread)).rejects.toThrow(/matched nothing/))
   it('stops runaway work', async () => expect(runExpression('$sum([1..100000].($ * 2))', {}, {}, { steps: 1000, stack: 400, sequence: 2_000_000 })).rejects.toThrow(/steps/))
-  // jsonata runs this tail call without a deeper stack, so it runs to the default step limit: seconds on a slow machine
-  it('stops runaway recursion', async () => expect(runExpression('($f := function($n){ $f($n + 1) }; $f(0))', {})).rejects.toThrow(EditError), 30_000)
+  // jsonata runs this tail call without a deeper stack, so the step limit stops it; a small one keeps the test fast
+  it('stops runaway recursion', async () => expect(runExpression('($f := function($n){ $f($n + 1) }; $f(0))', {}, {}, { ...LIMITS, steps: 100_000 })).rejects.toThrow(/steps/))
 })
