@@ -9,7 +9,7 @@ import { Home } from './Home'
 import { IslePage } from './IslePage'
 import { Library } from './Library'
 import { Login } from './Login'
-import { usePath } from './navigate'
+import { navigate, usePath } from './navigate'
 import { Profile } from './Profile'
 import { SitePage, SitesIndex } from './Sites'
 import { Connect, HandlePrompt, Settings } from './Settings'
@@ -56,6 +56,10 @@ export function App() {
   useEffect(() => {
     refresh()
   }, [refresh])
+  // the map was at /tree; old links still open it
+  useEffect(() => {
+    if (path === '/tree') navigate(`/map${location.search}${location.hash}`, { replace: true })
+  }, [path])
 
   const toast = useCallback((m: string) => {
     setToastMsg(m)
@@ -74,7 +78,7 @@ export function App() {
   else if ((m = /^\/(?:@|%40)([a-z0-9_-]+)\/?$/i.exec(path))) page = <Profile handle={m[1]!.toLowerCase()} tab={query.get('tab')} />
   else if (path === '/data') page = <MyData />
   else if (path === '/library') page = <Library />
-  else if (path === '/tree') page = <Archipelago />
+  else if (path === '/map' || path === '/tree') page = <Archipelago />
   else if (path === '/sites') page = <SitesIndex />
   else if ((m = /^\/s\/([^/]+)\/?$/.exec(path))) page = <SitePage site={decodeURIComponent(m[1]!)} />
   else if (path === '/settings') page = <Settings key={me?.id ?? 'anon'} />
@@ -98,7 +102,7 @@ export function App() {
             <Logo /> <span>Prolifica</span>
           </Link>
           {nav('/', 'Explore')}
-          {nav('/tree', 'Map')}
+          {nav('/map', 'Map')}
           {nav('/sites', 'Sites', 'hide-sm')}
           {me && nav('/library', 'Library')}
           {me && nav('/data', 'My data', 'hide-sm')}

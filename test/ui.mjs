@@ -43,7 +43,7 @@ const pins = await frame.$$eval('[data-prolifica-ui] .pf-pin', (ps) => ps.map((p
 console.log('pins in isle:', pins)
 await shot('isle-marked')
 
-for (const [name, path] of [['library', '/library'], ['tree', '/tree'], ['data', '/data'], ['connect', '/connect'], ['profile', '/@alice']]) {
+for (const [name, path] of [['library', '/library'], ['map', '/map'], ['data', '/data'], ['connect', '/connect'], ['profile', '/@alice']]) {
   await page.goto(B + path, { waitUntil: 'networkidle0' })
   await wait(1200)
   await shot(name)

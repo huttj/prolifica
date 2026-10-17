@@ -572,7 +572,7 @@ function packFamilies(fams: Fam[]) {
   }
 }
 
-/** A made-up sea for trying the map at scale: /tree?demo=3000 */
+/** A made-up sea for trying the map at scale: /map?demo=3000 */
 function demoChart(n: number): SeaChart {
   const r = rng(42)
   const words = ['Rainfall', 'Tensor', 'Discourse', 'Commute', 'Garden', 'Budget', 'Tides', 'Reading', 'Sleep', 'Coffee', 'Votes', 'Bike', 'Thread', 'Market', 'Bird', 'Steps']

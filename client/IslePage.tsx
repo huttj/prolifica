@@ -637,7 +637,7 @@ function Family({ isle }: { isle: Isle }) {
           {ancestors.length ? `Made from ${ancestors.length === 1 ? 'one isle' : `a line of ${ancestors.length}`}` : 'An original'}
           {below ? ` · ${below} remix${below === 1 ? '' : 'es'} grew from it` : ' · no remixes yet'}
         </span>
-        {isle.visibility === 'public' && <Link to={`/tree?isle=${isle.id}`} className="btn ghost sm" title="Where it sits on the map"><Icon name="map" /> Map</Link>}
+        {isle.visibility === 'public' && <Link to={`/map?isle=${isle.id}`} className="btn ghost sm" title="Where it sits on the map"><Icon name="map" /> Map</Link>}
       </div>
       <Link to={`/i/${isle.id}/family`} className="btn sm self-start" title="Every remix and version as a graph: what changed at each step, which features each one has, and a side-by-side compare">
         <Icon name="tree" /> See how it evolved
