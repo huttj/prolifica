@@ -412,13 +412,14 @@ const TOOLS = [
   {
     name: 'edit_isle',
     description:
-      'Change a few things in an isle\'s page (or its instructions for agents) without resending it: exact find/replace edits applied on the server. On your own isle a page change becomes a new version (with note); with as_remix it publishes your own version of any isle (parent set for you). Each find must match exactly once unless all: true. Use get_isle with grep to find the text first, then check_isle.',
+      'Change a few things in an isle\'s page (or its instructions for agents) without resending it: exact find/replace edits applied on the server. On your own isle a page change becomes a new version (with note); with as_remix it publishes your own version of any isle (parent set for you). Each find must match exactly once unless all: true. Use get_isle with grep to find the text first, then check_isle. version_note changes the note of an existing version of your isle, with no new version.',
     inputSchema: obj({
       id: s('Isle id'),
       edits: { type: 'array', description: 'Edits to the page, applied in order', items: obj({ find: s('Exact text to find (include enough around it to be unique)'), replace: s('What to put instead'), all: { type: 'boolean', description: 'Replace every occurrence' } }, ['find', 'replace']) },
       instructions: s('Instructions for agents about this page, in markdown: what drives its wording, what is fixed, its quirks (the whole text; "" clears them). Default: the ones of the isle the page came from'),
       instruction_edits: { type: 'array', description: 'Find/replace edits to the instructions, applied in order (instead of instructions)', items: obj({ find: s('Exact text to find'), replace: s('What to put instead'), all: { type: 'boolean' } }, ['find', 'replace']) },
       note: s('What changed, for the version history (or, as a remix, what you changed from the original)'),
+      version_note: obj({ version: { type: 'integer', description: 'The version (default: the latest)' }, note: s('The new note for that version ("" clears it)') }, ['note']),
       view: s('"same" if the page is still the same view (adapted to data, small fixes), "new" if it now looks or works differently', { enum: ['same', 'new'] }),
       as_remix: { type: 'boolean', description: 'Publish the edited page as a new isle with this one as its parent, instead of updating it' },
       title: s('With as_remix: the new isle\'s title'),
@@ -940,7 +941,15 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
       const { isle, row } = await store.getIsle(id)
       const pageEdits = Array.isArray(args.edits) && args.edits.length ? (args.edits as TextEdit[]) : undefined
       const instrEdits = Array.isArray(args.instruction_edits) && args.instruction_edits.length ? (args.instruction_edits as TextEdit[]) : undefined
-      if (!pageEdits && !instrEdits && typeof args.instructions !== 'string') throw new StoreError(400, 'Give edits (to the page), or instructions or instruction_edits')
+      const vn = args.version_note && typeof args.version_note === 'object' ? (args.version_note as { version?: unknown; note?: unknown }) : null
+      if (vn && !pageEdits && !instrEdits && typeof args.instructions !== 'string' && !args.as_remix) {
+        if (typeof vn.note !== 'string') throw new StoreError(400, 'version_note needs note: the new text ("" clears it)')
+        const v = vn.version === undefined ? undefined : Number(vn.version)
+        const out = await store.setVersionNote(id, v, vn.note)
+        return text({ ...brief(out), version: out.version, url: isleLink(out), version_note: { version: v ?? out.version, note: vn.note.trim() || null } })
+      }
+      if (vn) throw new StoreError(400, 'Give version_note on its own, without page or instruction edits')
+      if (!pageEdits && !instrEdits && typeof args.instructions !== 'string') throw new StoreError(400, 'Give edits (to the page), or instructions or instruction_edits, or version_note')
       let html: string | undefined
       let replaced = 0
       let instructions = typeof args.instructions === 'string' ? args.instructions : undefined

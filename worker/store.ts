@@ -1297,6 +1297,19 @@ export class Store {
    * move down to follow it. What pointed at a version by number moves with it: the remixes made from one
    * and other isles' versions that drew from one.
    */
+  /** Change the note of one version of your isle (the latest one by default), without a new version. */
+  async setVersionNote(id: string, version: number | undefined, note: string | null): Promise<Isle> {
+    const me = this.requireViewer()
+    const row = await this.isleRow(id)
+    if (!row || row.owner_id !== me.id) return fail(404, `You have no isle with id ${id}`)
+    const v = version ?? row.version
+    if (!Number.isInteger(v) || v < 1 || v > row.version) fail(400, `"${row.title}" has versions 1 to ${row.version}`)
+    const text = note?.trim().slice(0, 2000) || null
+    if (v === row.version) await this.d1.prepare('UPDATE isles SET note = ? WHERE id = ?').bind(text, id).run()
+    else await this.d1.prepare('UPDATE isle_versions SET note = ? WHERE isle_id = ? AND version = ?').bind(text, id, v).run()
+    return (await this.getIsle(id)).isle
+  }
+
   async squashVersions(id: string, opts: { from?: number; to?: number; note?: string | null } = {}): Promise<{ isle: Isle; renumbered: Record<number, number>; remixes: number; draws: number }> {
     const me = this.requireViewer()
     const row = await this.isleRow(id)

@@ -288,6 +288,11 @@ api.post('/api/isles/:id/restore', requireAuth, async (request, env, ctx) => {
   shootLater(ctx, env, request.params.id!, islesOrigin(request, env))
   return out
 })
+api.patch('/api/isles/:id/versions/:version', requireAuth, async (request, env) => {
+  const b = await body<{ note?: string | null }>(request)
+  if (b.note !== null && typeof b.note !== 'string') throw new StoreError(400, 'Give note: the new text, or null to clear it')
+  return { isle: await store(request, env).setVersionNote(request.params.id!, Number(request.params.version), b.note) }
+})
 api.post('/api/isles/:id/squash', requireAuth, async (request, env, ctx) => {
   const b = await body<{ from?: number; to?: number; note?: string | null }>(request)
   const out = await store(request, env).squashVersions(request.params.id!, { from: b.from === undefined ? undefined : Number(b.from), to: b.to === undefined ? undefined : Number(b.to), note: b.note })
