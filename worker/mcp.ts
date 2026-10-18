@@ -60,7 +60,7 @@ make here is public by default and can be remixed by anyone.
   full, so anyone can collect more the same way. If you scraped it, the code you ran is the
   code. Data gathered by identical code is linked up automatically.
 - Files on disk (when you have a shell): ask api_key for a 30-minute key and send them with curl,
-  rather than pasting big contents into write_data.
+  rather than pasting big contents into write_data. The same key downloads a dataset to process it.
 - To look at something on the web (the images in a thread, a page, a JSON file), use fetch_url: it
   runs on the server, images come back as images, up to 10 at a time. save_as keeps one as data with
   its source. Your own sandbox may not reach the web; fetch_url does.
@@ -178,6 +178,9 @@ Nothing you can do with a path, a field list or a filter should pass through you
                         rather than filtering it inside a loop, which is slow on big data)
     count by category:  messages{category: $count(id)}
   read_data takes an expression too, to look before you save. select, fields and where are shortcuts.
+  Expressions are for a part of the data or a small change: one stops after a million steps (a filter
+  over about 100,000 rows; a sort or a join of about 10,000). To sort, join or reshape all of a big
+  dataset, download it (api_key gives a curl command), run your own code, and send the result back.
 - Adding: edit_data append adds rows to an array; merge joins patches onto rows by a key field
   (key "id", rows [{id: 12, score: 3}]), so you send only your new fields and the text stays put. Build
   an analysis up in a few appends rather than one huge write_data.
@@ -282,7 +285,7 @@ const TOOLS = [
   {
     name: 'api_key',
     description:
-      'A key that lasts 30 minutes, for an agent with a shell (Claude Code, Codinger) to send files from disk with curl instead of putting their contents in a tool call. It acts as the person on /api. Returns the key and the curl commands.',
+      'A key that lasts 30 minutes, for an agent with a shell (Claude Code, Codinger) to send files from disk with curl, or download data to process it with its own code, instead of putting their contents in a tool call. It acts as the person on /api. Returns the key and the curl commands.',
     inputSchema: obj({ for: s('What it is for, e.g. "upload the scraped tweets"') }),
   },
   {
@@ -450,7 +453,7 @@ const TOOLS = [
   {
     name: 'derive_data',
     description:
-      'Make a new dataset from data you can read, on the server, without its contents passing through you. Either a JSONata expression (jsonata.org) over one source ($) or several named ones ($posts, $scores: join, reshape, count, anything), or the shortcuts select, fields, where and limit over one source. Saves JSON, or CSV when the path ends in .csv; derived_from is set to the sources and transform keeps the expression, so it can be read and re-run.',
+      'Make a new dataset from data you can read, on the server, without its contents passing through you. Either a JSONata expression (jsonata.org) over one source ($) or several named ones ($posts, $scores: join, reshape, count; for a part of the data, since an expression stops after a million steps), or the shortcuts select, fields, where and limit over one source. Saves JSON, or CSV when the path ends in .csv; derived_from is set to the sources and transform keeps the expression, so it can be read and re-run.',
     inputSchema: obj({
       from: {
         description: 'The source: a dataset id (it is $ in the expression), or several as {name: id} (each is $name, and $ is all of them as one object)',
@@ -668,6 +671,7 @@ async function callTool(env: Env, request: Request, user: UserRow, name: string,
         key: token,
         expires_at: new Date(expiresAt!).toISOString(),
         curl: {
+          download: `curl -s ${auth} -o rows.json "${app}/api/data/<data id>/raw"`,
           upload: `curl -s ${auth} -H "content-type: text/csv" --data-binary @rows.csv "${app}/api/data?path=folder/rows.csv"`,
           replace_contents: `curl -s -X PUT ${auth} --data-binary @rows.csv "${app}/api/data/<data id>/content"`,
           describe_or_move: `curl -s -X PATCH ${auth} -H "content-type: application/json" -d '{"path":"new/path.csv","description":"..."}' "${app}/api/data/<data id>"`,

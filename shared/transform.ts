@@ -9,16 +9,19 @@ import { EditError } from './edits'
  *
  * Bounded three ways: evaluation steps (Workers' clocks don't move during pure computation, so jsonata's
  * own timeout can't fire there; counting steps works everywhere), stack depth and sequence length.
+ * A step is one call of jsonata's evaluate(): one node of the expression for one value, about 0.3 µs.
+ * A million is enough to read a slice of a big file or make a small change (a filter over 100,000
+ * rows); sorting, joining or reshaping a whole big file is work for the agent's own code.
  */
 
-export const LIMITS = { steps: 20_000_000, stack: 400, sequence: 2_000_000 }
+export const LIMITS = { steps: 1_000_000, stack: 400, sequence: 2_000_000 }
 
 export async function runExpression(expression: string, input: unknown, vars: Record<string, unknown> = {}, limits = LIMITS): Promise<unknown> {
   let steps = 0
   // jsonata reads options.timeout at every step of evaluation: count those reads
   const options = {
     get timeout() {
-      if (++steps > limits.steps) throw { code: 'STEPS', message: `The expression took more than ${limits.steps.toLocaleString()} steps; narrow it (filter before mapping, avoid nested loops over big arrays)` }
+      if (++steps > limits.steps) throw { code: 'STEPS', message: `The expression took more than ${limits.steps.toLocaleString()} steps. Expressions are for reading a part of the data or a small change. Filter before you map; to process all of a big dataset, download it (api_key gives a curl command) and run your own code` }
       return Number.MAX_SAFE_INTEGER
     },
     stack: limits.stack,
