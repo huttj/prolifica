@@ -23,8 +23,9 @@ const LAST_AI_KEY = 'pf:lastAI'
 // never starts a session there by itself.
 const CODINGER_FIRST = `You're in Codinger, on my machine. If this is about changing an isle, work on it locally first: \
 pull it down into a Codinger artifact (get_isle for its page and instructions, read_data for each bound slot) in \
-~/.codinger/artifacts/<name>/, with "parent" and "isle" both set to the isle's id in artifact.json, show it with \
-show_artifact, and iterate there. Don't publish anything to Prolifica: I publish it from Codinger when it's ready, and \
+~/.codinger/artifacts/<name>/, with "parent" and "isle" both set to that isle's id in artifact.json. There, "parent" \
+means the isle you started from, not the parent that isle shows on Prolifica: when the publish updates that same \
+isle, Codinger leaves "parent" out and the family tree stays as it is. Show it with show_artifact, and iterate there. Don't publish anything to Prolifica: I publish it from Codinger when it's ready, and \
 because of "isle" that makes the isle's next version. This comes before anything below about publishing.`
 
 export function aiUrl(ai: AiId, prompt: string) {
