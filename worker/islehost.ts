@@ -1,5 +1,6 @@
 import { appOrigin, islesOrigin, verifyIsle } from './auth'
-import type { IsleRow } from './store'
+import { isleShareTags } from './pages'
+import { shotTag, type IsleRow } from './store'
 
 /**
  * isles.prolifica.app: where people's pages run. A different origin from the app, so an isle's
@@ -21,9 +22,9 @@ function escapeScriptJson(value: unknown) {
   return JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
-export function injectBridge(html: string, config: unknown, preload: string[] = []): string {
+export function injectBridge(html: string, config: unknown, preload: string[] = [], share = ''): string {
   // the data starts downloading alongside the page instead of after the isle's script asks for it
-  const early = preload.map((href) => `<link rel="preload" href="${href.replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`)}" as="fetch" crossorigin="anonymous">`).join('')
+  const early = share + preload.map((href) => `<link rel="preload" href="${href.replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`)}" as="fetch" crossorigin="anonymous">`).join('')
   const tags = `${early}<script>window.__PROLIFICA__=${escapeScriptJson(config)}</script><script src="/bridge.js"></script>`
   const head = /<head(\s[^>]*)?>/i.exec(html)
   if (head) return html.slice(0, head.index + head[0].length) + tags + html.slice(head.index + head[0].length)
@@ -47,7 +48,9 @@ export async function handleIslesHost(request: Request, env: Env): Promise<Respo
   const m = /^\/([a-z0-9]{6,16})(?:\/data\/([A-Za-z_][\w-]{0,40}))?\/?$/.exec(url.pathname)
   if (!m) return notFound()
   const [, isleId, slot] = m
-  const isle = await env.DB.prepare('SELECT * FROM isles WHERE id = ? AND deleted_at IS NULL').bind(isleId).first<IsleRow>()
+  const isle = await env.DB.prepare('SELECT i.*, u.handle AS owner_handle FROM isles i LEFT JOIN users u ON u.id = i.owner_id WHERE i.id = ? AND i.deleted_at IS NULL')
+    .bind(isleId)
+    .first<IsleRow & { owner_handle: string | null }>()
   if (!isle) return notFound()
   const grant = url.searchParams.get('g')
   if (isle.visibility === 'private' && !(await verifyIsle(env, isle.id, grant))) return notFound()
@@ -126,7 +129,20 @@ export async function handleIslesHost(request: Request, env: Env): Promise<Respo
     q.set('h', b.hash)
     return [`/${isle.id}/data/${encodeURIComponent(slot)}?${q}`]
   })
-  return new Response(injectBridge(await obj.text(), config, preload), {
+  const html = await obj.text()
+  // link previews (the same picture as the isle's page in the app), unless the page has its own
+  let share = ''
+  if (isle.visibility !== 'private' && !/<meta[^>]+property=["']?og:image["'\s>]/i.test(html)) {
+    const app = appOrigin(request, env)
+    share = isleShareTags({
+      title: isle.title,
+      description: isle.description,
+      owner: isle.owner_handle,
+      url: `${config.origin}/${isle.id}${config.version ? `?v=${encodeURIComponent(config.version)}` : ''}`,
+      image: `${app}/api/isles/${isle.id}/shot?og&v=${shotTag(isle)}`,
+    }).tags
+  }
+  return new Response(injectBridge(html, config, preload, share), {
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': cache, ...SECURITY_HEADERS },
   })
 }

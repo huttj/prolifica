@@ -24,4 +24,8 @@ describe('injectBridge', () => {
     const out = injectBridge('<head></head>', {}, ['/abc123/data/rows?v=2&h=deadbeef"x'])
     expect(out).toMatch(/^<head><link rel="preload" href="\/abc123\/data\/rows\?v=2&#38;h=deadbeef&#34;x" as="fetch" crossorigin="anonymous"><script>/)
   })
+  it('puts the link-preview tags first', () => {
+    const out = injectBridge('<head></head>', {}, ['/abc123/data/rows'], '<meta property="og:title" content="x">')
+    expect(out).toMatch(/^<head><meta property="og:title" content="x"><link rel="preload"/)
+  })
 })
