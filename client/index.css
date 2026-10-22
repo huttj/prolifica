@@ -679,6 +679,10 @@ a.isle-name:hover, button.isle-name:hover { text-decoration-style: solid; }
 .src-flag { font-size: 11px; font-weight: 700; color: #9a5b00; background: #fdf0d5; padding: 1px 8px; border-radius: 999px; }
 @media (prefers-color-scheme: dark) { .src-flag { color: #f2c46a; background: #3a2c10; } }
 .src-card { border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; background: var(--card); margin-top: 6px; }
+.src-row { margin-top: 6px; line-height: 1.6; }
+.src-row .kind { min-width: 0; font-size: 10px; padding: 1px 5px; }
+.src-row .link-btn { font: inherit; color: inherit; text-decoration: underline; }
+.umd-slots .src-card { padding: 7px 9px; }
 .src-card.self { border-color: #e2b85a; box-shadow: inset 3px 0 0 #e2b85a; }
 .src-notes summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .isle-instructions summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }

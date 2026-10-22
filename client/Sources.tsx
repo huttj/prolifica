@@ -21,7 +21,8 @@ interface SourceGroup {
 function groupSources(sources: IsleSource[]): SourceGroup[] {
   const groups = new Map<string, IsleSource[]>()
   for (const s of sources) {
-    const key = s.site && s.method ? `${s.method}|${s.site}` : `d|${s.dataset.id}`
+    // files added by hand are one group: each needs the same thing, your own file
+    const key = s.site && s.method ? `${s.method}|${s.site}` : s.method === 'upload' || s.method === 'manual' ? s.method : `d|${s.dataset.id}`
     groups.set(key, [...(groups.get(key) ?? []), s])
   }
   return [...groups.values()].map((list) => {
@@ -64,13 +65,60 @@ export function DataSources({ isle, compact = false }: { isle: Isle; compact?: b
   if (src.error || !src.data || !src.data.sources.length) return null
   const { sources, sites } = src.data
   const self = sources.filter((s) => s.selfServe)
+  const groups = groupSources(sources)
+  const siteOf = (g: SourceGroup) => sites.find((x) => x.site === g.lead.site) ?? null
+  if (compact)
+    return (
+      <details className="umd-slots" data-pid="data-sources" open={self.length > 0}>
+        <summary className="small">
+          Where this data came from <span className="muted">· {groups.length} source{groups.length === 1 ? '' : 's'}</span>
+          {self.length > 0 && <> <span className="src-flag">you collect it yourself</span></>}
+        </summary>
+        {groups.map((g) => g.lead.selfServe
+          ? <SourceCard key={g.lead.dataset.id} g={g} site={siteOf(g)} compact />
+          : <SourceRow key={g.lead.dataset.id} g={g} site={siteOf(g)} />)}
+      </details>
+    )
   return (
     <div className="sources" data-pid="data-sources">
       <div className="row" style={{ marginBottom: 6 }}>
         <b className="small grow">Where this data came from</b>
         {self.length > 0 && <span className="src-flag">you collect it yourself</span>}
       </div>
-      {groupSources(sources).map((g) => <SourceCard key={g.lead.dataset.id} g={g} site={sites.find((x) => x.site === g.lead.site) ?? null} compact={compact} />)}
+      {groups.map((g) => <SourceCard key={g.lead.dataset.id} g={g} site={siteOf(g)} compact={false} />)}
+    </div>
+  )
+}
+
+const owned = (g: SourceGroup) => [...new Map(g.datasets.map((d) => [d.owner.id, d.owner])).values()]
+const fileName = (d: DatasetRef) => d.path.split('/').pop() ?? d.path
+
+/** The original datasets of a group: all of them when there are a few, else the first ones and a count to open the rest. */
+function Originals({ g }: { g: SourceGroup }) {
+  const [all, setAll] = useState(false)
+  const FEW = 3
+  const shown = all ? g.datasets : g.datasets.slice(0, FEW)
+  return (
+    <>
+      {shown.map((d, i) => <span key={d.id}>{i ? ', ' : ''}<Link to={`/d/${d.id}`}>{fileName(d)}</Link></span>)}
+      {!all && g.datasets.length > FEW && <>, <button className="link-btn" onClick={() => setAll(true)}>{g.datasets.length - FEW} more</button></>}
+    </>
+  )
+}
+
+/** One line for a source that your AI can get again or that you bring yourself. */
+function SourceRow({ g, site }: { g: SourceGroup; site: { site: string; datasets: number } | null }) {
+  const s = g.lead
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="src-row tiny">
+      <span className="kind">{s.method ? COLLECTION_METHODS[s.method] : 'Unknown method'}</span>{' '}
+      {s.site ? <>from <b>{s.site}</b>{' · '}{g.datasets.length === 1 ? <Link to={`/d/${s.dataset.id}`}>the original data</Link> : <Originals g={g} />}</> : <Originals g={g} />}
+      <span className="muted"> · {owned(g).map((o, i) => <span key={o.id}>{i ? ', ' : ''}{who(o)}</span>)}</span>
+      {s.collectedAt && <span className="muted"> · {ago(s.collectedAt)}</span>}
+      {s.code && <> · <button className="link-btn" onClick={() => setOpen((o) => !o)}>{open ? 'hide the collector' : 'collector'}</button></>}
+      {site && site.datasets > 1 && <> · <Link to={`/s/${site.site}`}>{site.datasets} from {site.site} →</Link></>}
+      {open && s.code && <Collector s={s} linked={false} />}
     </div>
   )
 }
@@ -78,7 +126,7 @@ export function DataSources({ isle, compact = false }: { isle: Isle; compact?: b
 function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string; datasets: number; collectors: number; people: number } | null; compact: boolean }) {
   const s = g.lead
   const [open, setOpen] = useState(false)
-  const owners = [...new Map(g.datasets.map((d) => [d.owner.id, d.owner])).values()]
+  const owners = owned(g)
   const how = s.method ? COLLECTION_METHODS[s.method] : 'Unknown method'
   const bm = !!s.code && s.selfServe && isBookmarklet(s.method, s.code.language)
   return (
@@ -86,7 +134,7 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
       <div className="row" style={{ gap: 6 }}>
         <span className="kind">{how}</span>
         <span className="small grow ellipsis">
-          {s.site ? <>from <b>{s.site}</b></> : <Link to={`/d/${s.dataset.id}`}>{s.dataset.path}</Link>}
+          {s.site ? <>from <b>{s.site}</b></> : g.datasets.length > 1 ? `${g.datasets.length} files` : <Link to={`/d/${s.dataset.id}`}>{s.dataset.path}</Link>}
         </span>
         {s.collectedAt && <span className="tiny muted">{ago(s.collectedAt)}</span>}
       </div>
@@ -95,7 +143,7 @@ function SourceCard({ g, site, compact }: { g: SourceGroup; site: { site: string
         {g.datasets.length === 1 ? (
           <Link to={`/d/${s.dataset.id}`}>the original data</Link>
         ) : (
-          <>the originals: {g.datasets.map((d, i) => <span key={d.id}>{i ? ', ' : ''}<Link to={`/d/${d.id}`}>{d.path.split('/').slice(-2).join('/')}</Link></span>)}</>
+          <>the originals: <Originals g={g} /></>
         )}
       </div>
       {s.selfServe ? (
