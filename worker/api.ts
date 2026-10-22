@@ -8,7 +8,7 @@ import {
 import { Db, toPerson, type UserRow } from './db'
 import { sendMagicLink, sendStorageGranted, sendStorageRequest } from './email'
 import { badLinkPage, confirmLinkPage } from './pages'
-import { ogKey, rectsKey, shootLater, shotKey } from './shots'
+import { ogKey, rectsKey, shootLater, shootOldLater, shotKey } from './shots'
 import { shotTag, Store, StoreError, type Layer, type PublishInput, type SourceInput } from './store'
 
 type Args = [Env, ExecutionContext]
@@ -254,6 +254,16 @@ api.get('/api/isles/:id/shot', async (request, env, ctx) => {
   const row = await store(request, env).visibleIsleRow(request.params.id!)
   if (row.shot_version !== row.version) shootLater(ctx, env, row.id, islesOrigin(request, env))
   const q = new URL(request.url).searchParams
+  // ?og&of=<n>: the og picture of an older version (the current one's while it has none yet)
+  const of = Number(q.get('of'))
+  if (q.has('og') && Number.isInteger(of) && of > 0 && of < row.version) {
+    const og = await env.BLOBS.get(ogKey(row.id, of))
+    if (og) {
+      const cache = row.visibility === 'private' ? 'private, max-age=600' : q.get('v') === `${of}s${row.squashes}` ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
+      return new Response(og.body, { headers: { 'content-type': 'image/jpeg', 'cache-control': cache, 'x-content-type-options': 'nosniff' } })
+    }
+    shootOldLater(ctx, env, row.id, of, islesOrigin(request, env))
+  }
   const rects = q.has('rects')
   let obj = row.shot_version ? await env.BLOBS.get((rects ? rectsKey : shotKey)(row.id, row.shot_version)) : null
   let type = rects ? 'application/json' : 'image/webp'
@@ -264,7 +274,7 @@ api.get('/api/isles/:id/shot', async (request, env, ctx) => {
     else if (row.shot_version === row.version) shootLater(ctx, env, row.id, islesOrigin(request, env), true)
   }
   if (!obj) return new Response(rects ? 'null' : 'No picture yet', { status: rects ? 200 : 404, headers: { 'content-type': rects ? 'application/json' : 'text/plain', 'cache-control': 'no-store' } })
-  const final = q.get('v') === shotTag(row) && !(q.has('og') && type === 'image/webp')
+  const final = q.get('v') === shotTag(row) && !(q.has('og') && (type === 'image/webp' || q.has('of')))
   const cache = row.visibility === 'private' ? 'private, max-age=600' : final ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
   return new Response(obj.body, { headers: { 'content-type': type, 'cache-control': cache, 'x-content-type-options': 'nosniff' } })
 })

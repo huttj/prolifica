@@ -7,7 +7,7 @@ import type {
 } from '../shared/types'
 import { appOrigin, islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
-import { rectsKey, shotKey } from './shots'
+import { ogKey, rectsKey, shotKey } from './shots'
 
 /** Data, isles, the lineage graph and marks. Shared by the REST API and the MCP tools, so both obey the same rules. */
 
@@ -1389,6 +1389,24 @@ export class Store {
       ...redraws,
     ])
     if (row.shot_version) await this.env.BLOBS.delete([shotKey(id, row.shot_version), rectsKey(id, row.shot_version)])
+    // each version's og picture moves to its new number; the ones before `to` in the run go
+    const ogs: number[] = []
+    let cursor: string | undefined
+    do {
+      const page = await this.env.BLOBS.list({ prefix: `shots/${id}/v`, cursor })
+      for (const o of page.objects) {
+        const n = /\/v(\d+)\.og\.jpg$/.exec(o.key)
+        if (n && Number(n[1]) >= from) ogs.push(Number(n[1]))
+      }
+      cursor = page.truncated ? page.cursor : undefined
+    } while (cursor)
+    for (const n of ogs.sort((a, b) => a - b)) {
+      if (n >= to) {
+        const obj = await this.env.BLOBS.get(ogKey(id, n))
+        if (obj) await this.env.BLOBS.put(ogKey(id, remap(n)), await obj.arrayBuffer(), { httpMetadata: obj.httpMetadata })
+      }
+      await this.env.BLOBS.delete(ogKey(id, n))
+    }
 
     const renumbered: Record<number, number> = {}
     for (let v = from + 1; v <= cur; v++) renumbered[v] = remap(v)

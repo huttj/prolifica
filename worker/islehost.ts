@@ -58,7 +58,8 @@ export async function handleIslesHost(request: Request, env: Env): Promise<Respo
 
   // ?v=<n> for an older version shows that version's page and data (the current one is on the isle itself)
   const v = Number(url.searchParams.get('v'))
-  if (Number.isInteger(v) && v > 0 && v < isle.version) {
+  const old = Number.isInteger(v) && v > 0 && v < isle.version
+  if (old) {
     const old = await env.DB.prepare('SELECT source_blob, bindings FROM isle_versions WHERE isle_id = ? AND version = ?').bind(isle.id, v).first<{ source_blob: string; bindings: string }>()
     if (!old) return notFound(`This isle has no version ${v}`)
     isle.source_blob = old.source_blob
@@ -139,7 +140,7 @@ export async function handleIslesHost(request: Request, env: Env): Promise<Respo
       description: isle.description,
       owner: isle.owner_handle,
       url: `${config.origin}/${isle.id}${config.version ? `?v=${encodeURIComponent(config.version)}` : ''}`,
-      image: `${app}/api/isles/${isle.id}/shot?og&v=${shotTag(isle)}`,
+      image: old ? `${app}/api/isles/${isle.id}/shot?og&of=${isle.version}&v=${isle.version}s${isle.squashes}` : `${app}/api/isles/${isle.id}/shot?og&v=${shotTag(isle)}`,
     }).tags
   }
   return new Response(injectBridge(html, config, preload, share), {

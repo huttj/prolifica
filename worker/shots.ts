@@ -1,4 +1,4 @@
-import puppeteer from '@cloudflare/puppeteer'
+import puppeteer, { type Browser } from '@cloudflare/puppeteer'
 import { signIsle } from './auth'
 
 /**
@@ -57,12 +57,7 @@ export async function shootIsle(env: Env, isleId: string, islesOrigin: string, r
   if (row.visibility === 'private') url += `&g=${encodeURIComponent(await signIsle(env, row.id))}`
   const browser = await puppeteer.launch(env.BROWSER)
   try {
-    const page = await browser.newPage()
-    await page.setViewport({ width: SHOT_W, height: SHOT_H, deviceScaleFactor: 1 })
-    await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 25_000 }).catch(() => {})
-    // let charts finish drawing and anything animated settle
-    await new Promise((r) => setTimeout(r, 1500))
+    const page = await openIsle(browser, url)
     const marked = await env.DB.prepare(`SELECT DISTINCT json_extract(anchor, '$.selector') AS s FROM marks WHERE isle_id = ? AND anchor IS NOT NULL LIMIT 200`)
       .bind(row.id)
       .all<{ s: string | null }>()
@@ -84,10 +79,53 @@ export async function shootIsle(env: Env, isleId: string, islesOrigin: string, r
     await env.BLOBS.put(rectsKey(row.id, row.version), JSON.stringify(meta), { httpMetadata: { contentType: 'application/json' } })
     // (unless its history was squashed meanwhile, renumbering the version this shows)
     const done = await env.DB.prepare('UPDATE isles SET shot_version = ? WHERE id = ? AND version = ? AND squashes = ? AND (shot_version IS NULL OR shot_version < ?)').bind(row.version, row.id, row.version, row.squashes, row.version).run()
-    if (done.meta.changes && row.shot_version) await env.BLOBS.delete([shotKey(row.id, row.shot_version), rectsKey(row.id, row.shot_version), ogKey(row.id, row.shot_version)])
+    // the og picture stays: a link to that version keeps its own preview
+    if (done.meta.changes && row.shot_version) await env.BLOBS.delete([shotKey(row.id, row.shot_version), rectsKey(row.id, row.shot_version)])
   } finally {
     await browser.close()
   }
+}
+
+async function openIsle(browser: Browser, url: string) {
+  const page = await browser.newPage()
+  await page.setViewport({ width: SHOT_W, height: SHOT_H, deviceScaleFactor: 1 })
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
+  await page.goto(url, { waitUntil: 'networkidle0', timeout: 25_000 }).catch(() => {})
+  // let charts finish drawing and anything animated settle
+  await new Promise((r) => setTimeout(r, 1500))
+  return page
+}
+
+/**
+ * The og picture of an older version, for a link to it (isles.prolifica.app/<isle>?v=<n>). Versions
+ * shot since og pictures are kept have one already; this fills in the ones from before, when asked.
+ */
+export async function shootOldVersion(env: Env, isleId: string, version: number, islesOrigin: string): Promise<void> {
+  const row = await env.DB.prepare('SELECT id, version, visibility, squashes FROM isles WHERE id = ? AND deleted_at IS NULL').bind(isleId).first<Pick<ShotRow, 'id' | 'version' | 'visibility' | 'squashes'>>()
+  if (!row || version >= row.version) return
+  const now = Date.now()
+  const claimed = await env.DB.prepare('UPDATE isle_versions SET og_at = ? WHERE isle_id = ? AND version = ? AND (og_at IS NULL OR og_at < ?)')
+    .bind(now, row.id, version, now - RETRY_MS)
+    .run()
+  if (!claimed.meta.changes) return
+
+  let url = `${islesOrigin}/${row.id}?v=${version}`
+  if (row.visibility === 'private') url += `&g=${encodeURIComponent(await signIsle(env, row.id))}`
+  const browser = await puppeteer.launch(env.BROWSER)
+  try {
+    const page = await openIsle(browser, url)
+    const og = await page.screenshot({ type: 'jpeg', quality: 80, clip: { x: 0, y: 0, width: SHOT_W, height: OG_H } })
+    await env.BLOBS.put(ogKey(row.id, version), og, { httpMetadata: { contentType: 'image/jpeg' } })
+    // a squash meanwhile renumbered the versions: this picture may be of another one now
+    const after = await env.DB.prepare('SELECT squashes FROM isles WHERE id = ?').bind(row.id).first<{ squashes: number }>()
+    if (after?.squashes !== row.squashes) await env.BLOBS.delete(ogKey(row.id, version))
+  } finally {
+    await browser.close()
+  }
+}
+
+export function shootOldLater(ctx: { waitUntil(p: Promise<unknown>): void }, env: Env, isleId: string, version: number, islesOrigin: string) {
+  ctx.waitUntil(shootOldVersion(env, isleId, version, islesOrigin).catch((e) => console.error('old shot failed', isleId, version, e)))
 }
 
 /** Fire and forget, logging failures (a missing shot only means a placeholder). */
