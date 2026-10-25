@@ -94,6 +94,8 @@ interface Isl {
   short: string | null
   /** what kind of page it is ("Discourse map"), if its publisher said */
   viewName: string | null
+  /** a remix that joined its parent's group because it declares the same kind of page */
+  evolved?: boolean
   /** what the map writes under it: what's particular to it, without its group's name */
   label: string
   seed: number
@@ -240,6 +242,15 @@ function buildWorld(chart: SeaChart): World {
     if (first) join(i, first)
     else byPage.set(i.page, i)
     if (i.parent && i.relation === 'rebind') join(i, i.parent)
+  }
+  // a group is a kind of page, and a kind of page evolves: a remix that declares the same kind as its parent's
+  // group (its view_name) joins that group. A change big enough to make a new kind of page names a new kind.
+  {
+    const sofar = new Map<Isl, Isl[]>()
+    for (const i of isles) { const r = find(i); const g = sofar.get(r); if (g) g.push(i); else sofar.set(r, [i]) }
+    const kind = new Map([...sofar].map(([r, ms]) => [r, viewName(ms).toLowerCase()]))
+    const evolved = isles.filter((i) => i.parent && i.relation !== 'rebind' && i.viewName && find(i) !== find(i.parent) && i.viewName.toLowerCase() === kind.get(find(i.parent)))
+    for (const i of evolved) { i.evolved = true; join(i, i.parent!) }
   }
   const groups = new Map<Isl, Isl[]>()
   for (const i of isles) { const r = find(i); const g = groups.get(r); if (g) g.push(i); else groups.set(r, [i]) }
@@ -457,7 +468,8 @@ function layoutFamily(f: Fam) {
     for (const k of n.lk) {
       const span = ((a1 - a0) * k.leaves) / n.leaves
       const mid = a + span / 2 + (rand() - 0.5) * span * 0.3
-      const dist = ring[k.ld]! * (0.92 + rand() * 0.16)
+      // a remix that joined its parent's group (evolved) stands a little farther out than the rebinds
+      const dist = ring[k.ld]! * (0.92 + rand() * 0.16) * (k.evolved ? 1.2 : 1)
       k.x = Math.cos(mid) * dist
       k.y = Math.sin(mid) * dist
       // past the first ring, keep a branch heading outward instead of curling back past the root

@@ -137,7 +137,9 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   name on the map; without it the map cuts the title down itself, and siblings that share an opening
   ("Anatomy of a …") all end up reading alike. Fix a missing one with publish_isle id + short_title.
 - view_name: what kind of page it is ("Discourse map", "City guide"): its format, which names its group
-  on the map. Give it when you make a new page; a rebind inherits it.
+  on the map. Give it when you make a new page; a rebind inherits it. A remix that gives the same view_name
+  as its parent's group stays in that group, a little apart: a kind of page evolves. Give a new view_name
+  only when the remix makes a different kind of page.
 - When you do pass html, say what you changed with view: "same" (you only adapted it to the data or
   fixed something small; it is the same view) or view: "new" (it looks or works differently). If you
   don't say, a near-identical page counts as the same view.
@@ -493,7 +495,7 @@ const TOOLS = [
       html: s('The whole page. Reads data with await prolifica.data("slot").'),
       title: s('Title'),
       short_title: s('Always give one. One to four words (under ~24 characters) naming what is particular to this one ("Kennewick", "Bike assault", "Paul Graham pushback"): its name on the map, which already shows what kind of page it is'),
-      view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s; give it for a new page or when a remix makes a different kind of page.'),
+      view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s. A remix with the same view_name as its parent\'s group stays in that group; give a new one only when a remix makes a different kind of page.'),
       description: s('What it shows, in two to four short sentences (blank lines between paragraphs). The data shape it expects goes in the slot descriptions, not here.'),
       slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
       bindings: { type: 'object', description: 'Slot name -> dataset id', additionalProperties: { type: 'string' } },
@@ -504,7 +506,7 @@ const TOOLS = [
       visibility: s('public (default), unlisted, or private', { enum: ['public', 'unlisted', 'private'] }),
       id: s('Update this isle of yours in place (keeps the old version)'),
       note: s('What changed, in a sentence or two. For an update: what this version changed. For a new remix: what you changed from the original and why. Shown in the family\'s evolution view, so be specific ("swapped in Kennewick\'s data; city name now read from meta.city").'),
-      view: s('With html and a parent: "same" if you only adapted the page to new data or fixed something small, "new" if it now looks or works differently. Decides whether it joins its parent\'s island group.', { enum: ['same', 'new'] }),
+      view: s('With html and a parent: "same" if you only adapted the page to new data or fixed something small, "new" if it now looks or works differently. "same" makes it a rebind, in its parent\'s island group; a "new" view stays in that group too when it keeps its parent\'s view_name.', { enum: ['same', 'new'] }),
       changes: { type: 'array', description: 'What this version changed, part by part: [{part, what}], part being a component of the page (use its data-pid when it has one, e.g. "legend", "selected-tweet"). Lets people follow one component\'s history across the family.', items: obj({ part: s('The component'), what: s('What changed in it') }, ['part', 'what']) },
       propagate: { type: 'boolean', description: 'When this changes the page of your own isle: give the same new page to your other isles that ran the old one (each gets a version drawing from this one). Others\' isles are never touched.' },
       draws_from: { type: 'array', description: 'Other isles this version pulls changes from (not its parent): e.g. you brought in a sibling remix\'s new sidebar. [{isle, version (default: its latest), note: what you took}]. Shown as a converging edge in the family graph.', items: obj({ isle: s('Isle id'), version: { type: 'integer' }, note: s('What you took from it'), parts: { type: 'array', items: { type: 'string' }, description: 'Which components you took (data-pid names)' } }, ['isle']) },
