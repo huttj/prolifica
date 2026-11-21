@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyRelation, pageSimilarity, resolveBindings, sameBindings } from './relation'
+import { classifyRelation, mergeOnUpdate, pageSimilarity, resolveBindings, sameBindings } from './relation'
 
 describe('classifyRelation', () => {
   const parent = { source: 'h1', bindings: { rows: 'd1' } }
@@ -51,13 +51,29 @@ describe('resolveBindings', () => {
   it('null unbinds a slot on an update', () => {
     expect(resolveBindings(own, { media: null }, { update: true })).toEqual({ posts: 'd1', people: 'd2' })
   })
-  it('an update with new slots unbinds the slots the page no longer has', () => {
-    expect(resolveBindings(own, { avatars: 'd4' }, { update: true, slots: { posts: {}, people: {}, avatars: {} } })).toEqual({ posts: 'd1', people: 'd2', avatars: 'd4' })
+  it('an update that adds slots keeps the other slots bound', () => {
+    expect(resolveBindings(own, { avatars: 'd4', sheet: 'd5' }, { update: true, slots: { avatars: {}, sheet: {} } })).toEqual({ ...own, avatars: 'd4', sheet: 'd5' })
+  })
+  it('a slot removed with null in slots loses its data', () => {
+    expect(resolveBindings(own, undefined, { update: true, slots: { media: null } })).toEqual({ posts: 'd1', people: 'd2' })
   })
   it('an update that changes nothing keeps the order of the slots', () => {
     expect(JSON.stringify(resolveBindings(own, { media: 'd3', posts: 'd1' }, { update: true }))).toBe(JSON.stringify(own))
   })
   it('a new isle gets exactly the bindings given', () => {
     expect(resolveBindings(own, { posts: 'd7', media: null }, { update: false })).toEqual({ posts: 'd7' })
+  })
+})
+
+describe('mergeOnUpdate', () => {
+  const slots = { posts: { kind: 'json' }, people: { kind: 'json' } }
+  it('an update adds and changes the slots it names and keeps the others', () => {
+    expect(mergeOnUpdate(slots, { people: { kind: 'csv' }, avatars: { kind: 'image' } }, true)).toEqual({ posts: { kind: 'json' }, people: { kind: 'csv' }, avatars: { kind: 'image' } })
+  })
+  it('null removes a slot on an update', () => {
+    expect(mergeOnUpdate(slots, { people: null }, true)).toEqual({ posts: { kind: 'json' } })
+  })
+  it('a new isle gets exactly the slots given', () => {
+    expect(mergeOnUpdate(slots, { avatars: { kind: 'image' } }, false)).toEqual({ avatars: { kind: 'image' } })
   })
 })

@@ -14,19 +14,33 @@ export function sameBindings(a: Record<string, string>, b: Record<string, string
 }
 
 /**
- * The bindings a publish ends with. With none given, the basis's (the isle's own on an update, else its
- * parent's or the page's isle's). On an update, the given ones are merged into the isle's: a slot given
- * as null is unbound, and when new slots are given, a slot the page no longer has is unbound too. A new
- * isle (a remix or rebind) that gives bindings gets those only.
+ * What an isle's slots or bindings become after a publish. With none given, the basis's (the isle's own on
+ * an update, else its parent's or the page's isle's). On an update, the given ones are merged into the
+ * isle's: the isle's keep their order, a key given as null goes, new keys come last. A new isle (a remix or
+ * rebind) that gives some gets those only.
  */
-export function resolveBindings(basis: Record<string, string>, given: Record<string, string | null> | undefined, opts: { update: boolean; slots?: Record<string, unknown> }): Record<string, string> {
+export function mergeOnUpdate<T>(basis: Record<string, T>, given: Record<string, T | null> | undefined, update: boolean): Record<string, T> {
   if (!given) return basis
-  const out: Record<string, string> = {}
-  const pageHas = (k: string) => !opts.slots || !Object.keys(opts.slots).length || k in opts.slots
-  // the isle's own slots first, in their order, so an update that changes nothing stores the same bindings
-  if (opts.update) for (const [k, v] of Object.entries(basis)) if (k in given ? given[k] != null : pageHas(k)) out[k] = k in given ? String(given[k]) : v
-  for (const [k, v] of Object.entries(given)) if (v != null && !(k in out)) out[k] = String(v)
+  const out: Record<string, T> = {}
+  // the isle's own keys first, in their order, so an update that changes nothing stores the same JSON
+  if (update) for (const [k, v] of Object.entries(basis)) if (!(k in given)) out[k] = v
+    else if (given[k] != null) out[k] = given[k]!
+  for (const [k, v] of Object.entries(given)) if (v != null && !(k in out)) out[k] = v
   return out
+}
+
+/**
+ * The bindings a publish ends with: merged like mergeOnUpdate, and a slot removed from the slots (given as
+ * null there) loses its data too.
+ */
+export function resolveBindings(
+  basis: Record<string, string>,
+  given: Record<string, string | null> | undefined,
+  opts: { update: boolean; slots?: Record<string, unknown> | null },
+): Record<string, string> {
+  const out = mergeOnUpdate(basis, given, opts.update)
+  const gone = Object.entries(opts.slots ?? {}).filter(([, v]) => v === null).map(([k]) => k)
+  return gone.some((k) => k in out) ? Object.fromEntries(Object.entries(out).filter(([k]) => !gone.includes(k))) : out
 }
 
 /**

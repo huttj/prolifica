@@ -1,4 +1,4 @@
-import { classifyRelation, pageChanges, pageSimilarity, resolveBindings, type Relation } from '../shared/relation'
+import { classifyRelation, mergeOnUpdate, pageChanges, pageSimilarity, resolveBindings, type Relation } from '../shared/relation'
 import { imagesIn } from '../shared/images'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type PageDelta, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
@@ -143,9 +143,12 @@ export interface PublishInput {
   from?: string
   title?: string
   description?: string | null
-  slots?: Record<string, SlotSpec>
+  /** slot -> what it expects; on an update, merged into the isle's slots, and null removes a slot (and its data) */
+  slots?: Record<string, SlotSpec | null>
   /** slot -> dataset id; on an update, merged into the isle's bindings, and null removes a slot */
   bindings?: Record<string, string | null>
+  /** the bindings given are all of them, not merged (a restore of an old version) */
+  replaceBindings?: boolean
   parent?: string
   uses?: { isle: string; selector?: string; label?: string }[]
   visibility?: Visibility
@@ -1197,8 +1200,8 @@ export class Store {
     else return fail(400, 'Give the page as html, or name an isle to take it from with from (or parent)')
 
     const basis = from ?? existing ?? parent
-    const slots: Record<string, SlotSpec> = input.slots ?? parseJson(basis?.slots ?? null, {})
-    const bindingIds = resolveBindings(parseJson(existing?.bindings ?? parent?.bindings ?? from?.bindings ?? null, {}), input.bindings, { update: !!existing, slots: input.slots })
+    const slots = mergeOnUpdate<SlotSpec>(parseJson(basis?.slots ?? null, {}), input.slots, !!existing)
+    const bindingIds = resolveBindings(parseJson(existing?.bindings ?? parent?.bindings ?? from?.bindings ?? null, {}), input.bindings, { update: !!existing && !input.replaceBindings, slots: input.slots })
     for (const slot of Object.keys(bindingIds)) {
       if (!/^[A-Za-z_][\w-]{0,40}$/.test(slot)) fail(400, `Slot names are short identifiers; "${slot}" is not one`)
     }
@@ -1356,7 +1359,7 @@ export class Store {
       .bind(id, version)
       .first<{ source_blob: string; bindings: string; instructions: string | null }>()
     if (!old) fail(404, `This isle has no version ${version} to restore`)
-    return (await this.publishIsle({ id, sourceBlob: old!.source_blob, bindings: parseJson(old!.bindings, {}), instructions: old!.instructions ?? undefined, note: `Restored version ${version}` })).isle
+    return (await this.publishIsle({ id, sourceBlob: old!.source_blob, bindings: parseJson(old!.bindings, {}), replaceBindings: true, instructions: old!.instructions ?? undefined, note: `Restored version ${version}` })).isle
   }
 
   /**

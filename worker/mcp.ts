@@ -10,7 +10,7 @@ import { runExpression } from '../shared/transform'
 import { Db, type UserRow } from './db'
 import { fetchOut } from './fetchout'
 import { Store, StoreError, fmtBytes, type Layer, type SourceInput } from './store'
-import { resolveBindings } from '../shared/relation'
+import { mergeOnUpdate, resolveBindings } from '../shared/relation'
 
 /**
  * The MCP endpoint: JSON-RPC over POST, stateless, never streams (the desktop.fyi shape).
@@ -149,8 +149,9 @@ data: it asks for it by slot name, so anyone can run their own data through it.
   lineage trees get drawn and how credit flows.
 - Update your own isle in place with id=<isle> and a short note saying what changed; each
   update keeps the old version, and people can look back through the history. An update's
-  bindings name only the slots that change: the others keep their data, and null unbinds one.
-  New slots (with new html) unbind any slot the page no longer has.
+  slots and bindings name only the slots that change: the others stay as they are. In
+  bindings, null unbinds a slot; in slots, null removes the slot and unbinds its data (do
+  that when new html stops reading a slot).
 
 ## Instructions for agents
 An isle can carry instructions: a short markdown file written for agents, about that one page. What
@@ -500,7 +501,7 @@ const TOOLS = [
       short_title: s('Always give one. One to four words (under ~24 characters) naming what is particular to this one ("Kennewick", "Bike assault", "Paul Graham pushback"): its name on the map, which already shows what kind of page it is'),
       view_name: s('What kind of page this is, the format not the content, in one to three words ("Discourse map", "City guide", "Concept map"). Names its group on the map. A rebind inherits its parent\'s. A remix with the same view_name as its parent\'s group stays in that group; give a new one only when a remix makes a different kind of page.'),
       description: s('What it shows, in two to four short sentences (blank lines between paragraphs). The data shape it expects goes in the slot descriptions, not here.'),
-      slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }', additionalProperties: { type: 'object' } },
+      slots: { type: 'object', description: 'Slot name -> { kind: csv|json|text|markdown|image|any, description }. On an update (id), only the slots you name change: the others stay, and null removes a slot and unbinds its data. A new isle (parent or from) gets exactly these', additionalProperties: { type: ['object', 'null'] } },
       bindings: { type: 'object', description: 'Slot name -> dataset id. On an update (id), only the slots you name change: the others keep their data, and null unbinds a slot. A new isle (parent or from) gets exactly these', additionalProperties: { type: ['string', 'null'] } },
       instructions: s('Instructions for agents about this page, in markdown: what drives its wording, what is fixed, its quirks (the whole text; "" clears them). Default: the ones of the isle the page came from'),
       parent: s('The isle this builds on (sets the lineage). An isle of yours with no parent can be given one later, once'),
@@ -1229,12 +1230,11 @@ function bindingsArg(b: unknown): Record<string, string | null> | undefined {
 async function dryRun(store: Store, user: UserRow, args: Record<string, unknown>) {
   const basisId = str(args.id) ?? str(args.from) ?? str(args.parent)
   const basis = basisId ? await store.getIsle(basisId) : null
-  const slots = (args.slots && typeof args.slots === 'object' ? args.slots : (basis?.isle.slots ?? {})) as Record<string, SlotSpec>
+  const update = !!str(args.id)
+  const givenSlots = args.slots && typeof args.slots === 'object' ? (args.slots as Record<string, SlotSpec | null>) : undefined
+  const slots = mergeOnUpdate<SlotSpec>(basis?.isle.slots ?? {}, givenSlots, update)
   const own = Object.fromEntries(Object.entries(basis?.isle.bindings ?? {}).flatMap(([k, d]) => (d ? [[k, d.id]] : [])))
-  const bindings = resolveBindings(own, bindingsArg(args.bindings), {
-    update: !!str(args.id),
-    slots: args.slots && typeof args.slots === 'object' ? (args.slots as Record<string, unknown>) : undefined,
-  })
+  const bindings = resolveBindings(own, bindingsArg(args.bindings), { update, slots: givenSlots })
   const visibility = str(args.visibility) ?? (str(args.id) && basis ? basis.isle.visibility : 'public')
   const html = typeof args.html === 'string' ? args.html : basis ? await store.blobText(basis.row.source_blob) : ''
   const read = new Set([...html.matchAll(/prolifica\.(?:data|dataUrl)\(\s*['"`]([\w-]+)['"`]/g)].map((m) => m[1]!))
