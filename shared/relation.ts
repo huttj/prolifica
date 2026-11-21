@@ -14,6 +14,22 @@ export function sameBindings(a: Record<string, string>, b: Record<string, string
 }
 
 /**
+ * The bindings a publish ends with. With none given, the basis's (the isle's own on an update, else its
+ * parent's or the page's isle's). On an update, the given ones are merged into the isle's: a slot given
+ * as null is unbound, and when new slots are given, a slot the page no longer has is unbound too. A new
+ * isle (a remix or rebind) that gives bindings gets those only.
+ */
+export function resolveBindings(basis: Record<string, string>, given: Record<string, string | null> | undefined, opts: { update: boolean; slots?: Record<string, unknown> }): Record<string, string> {
+  if (!given) return basis
+  const out: Record<string, string> = {}
+  const pageHas = (k: string) => !opts.slots || !Object.keys(opts.slots).length || k in opts.slots
+  // the isle's own slots first, in their order, so an update that changes nothing stores the same bindings
+  if (opts.update) for (const [k, v] of Object.entries(basis)) if (k in given ? given[k] != null : pageHas(k)) out[k] = k in given ? String(given[k]) : v
+  for (const [k, v] of Object.entries(given)) if (v != null && !(k in out)) out[k] = String(v)
+  return out
+}
+
+/**
  * How alike two pages are, 0 to 1: the share of their lines (and CSS rules and tags, so minified pages
  * count too) they have in common. A page adapted to new data (a few names and labels swapped) scores
  * about .95; two different visualizations score under .2.

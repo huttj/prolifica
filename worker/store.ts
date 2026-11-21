@@ -1,4 +1,4 @@
-import { classifyRelation, pageChanges, pageSimilarity, type Relation } from '../shared/relation'
+import { classifyRelation, pageChanges, pageSimilarity, resolveBindings, type Relation } from '../shared/relation'
 import { imagesIn } from '../shared/images'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type PageDelta, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
@@ -144,7 +144,8 @@ export interface PublishInput {
   title?: string
   description?: string | null
   slots?: Record<string, SlotSpec>
-  bindings?: Record<string, string>
+  /** slot -> dataset id; on an update, merged into the isle's bindings, and null removes a slot */
+  bindings?: Record<string, string | null>
   parent?: string
   uses?: { isle: string; selector?: string; label?: string }[]
   visibility?: Visibility
@@ -1197,7 +1198,7 @@ export class Store {
 
     const basis = from ?? existing ?? parent
     const slots: Record<string, SlotSpec> = input.slots ?? parseJson(basis?.slots ?? null, {})
-    const bindingIds: Record<string, string> = input.bindings ?? parseJson(existing?.bindings ?? parent?.bindings ?? from?.bindings ?? null, {})
+    const bindingIds = resolveBindings(parseJson(existing?.bindings ?? parent?.bindings ?? from?.bindings ?? null, {}), input.bindings, { update: !!existing, slots: input.slots })
     for (const slot of Object.keys(bindingIds)) {
       if (!/^[A-Za-z_][\w-]{0,40}$/.test(slot)) fail(400, `Slot names are short identifiers; "${slot}" is not one`)
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyRelation, pageSimilarity, sameBindings } from './relation'
+import { classifyRelation, pageSimilarity, resolveBindings, sameBindings } from './relation'
 
 describe('classifyRelation', () => {
   const parent = { source: 'h1', bindings: { rows: 'd1' } }
@@ -38,4 +38,26 @@ describe('pageSimilarity', () => {
   it('is 1 for the same page', () => expect(pageSimilarity(page, page)).toBe(1))
   it('stays high when a few labels change', () => expect(pageSimilarity(page, page.replace('Row 3<', 'Kennewick<').replace('Row 9<', 'WA<'))).toBeGreaterThan(0.95))
   it('is low for a different page', () => expect(pageSimilarity(page, '<main><h1>Other</h1><p>x</p></main>')).toBeLessThan(0.1))
+})
+
+describe('resolveBindings', () => {
+  const own = { posts: 'd1', people: 'd2', media: 'd3' }
+  it('keeps the basis when no bindings are given', () => {
+    expect(resolveBindings(own, undefined, { update: true })).toEqual(own)
+  })
+  it('an update changes only the slots it names', () => {
+    expect(resolveBindings(own, { people: 'd9', avatars: 'd4' }, { update: true })).toEqual({ posts: 'd1', people: 'd9', media: 'd3', avatars: 'd4' })
+  })
+  it('null unbinds a slot on an update', () => {
+    expect(resolveBindings(own, { media: null }, { update: true })).toEqual({ posts: 'd1', people: 'd2' })
+  })
+  it('an update with new slots unbinds the slots the page no longer has', () => {
+    expect(resolveBindings(own, { avatars: 'd4' }, { update: true, slots: { posts: {}, people: {}, avatars: {} } })).toEqual({ posts: 'd1', people: 'd2', avatars: 'd4' })
+  })
+  it('an update that changes nothing keeps the order of the slots', () => {
+    expect(JSON.stringify(resolveBindings(own, { media: 'd3', posts: 'd1' }, { update: true }))).toBe(JSON.stringify(own))
+  })
+  it('a new isle gets exactly the bindings given', () => {
+    expect(resolveBindings(own, { posts: 'd7', media: null }, { update: false })).toEqual({ posts: 'd7' })
+  })
 })
