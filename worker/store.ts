@@ -1,7 +1,7 @@
 import { classifyRelation, pageChanges, pageSimilarity, type Relation } from '../shared/relation'
 import { imagesIn } from '../shared/images'
 import { siteOf } from '../shared/site'
-import { COLLECTION_METHODS, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
+import { COLLECTION_METHODS, type PageDelta, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
   Anchor, AnchorState, CollectionMethod, DataDelta, IsleSource, IsleSources, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
 } from '../shared/types'
@@ -959,10 +959,19 @@ export class Store {
   async evolution(id: string, { limit = 60, pages = true }: { limit?: number; pages?: boolean } = {}): Promise<Evolution> {
     const focus = await this.visibleIsleRow(id)
     let root = focus
-    for (let i = 0; i < 50 && root.parent_id; i++) {
-      const p = await this.isleRow(root.parent_id)
-      if (!p || !this.canSeeIsle(p)) break
-      root = p
+    if (focus.parent_id) {
+      // every ancestor in one query, nearest first; the walk stops at a deleted isle
+      const { results: up } = await this.d1
+        .prepare(
+          `WITH RECURSIVE up(id, n) AS (SELECT ?, 1 UNION ALL SELECT i.parent_id, up.n + 1 FROM up JOIN isles i ON i.id = up.id AND i.deleted_at IS NULL WHERE i.parent_id IS NOT NULL AND up.n < 50)
+           SELECT isles.* FROM up JOIN isles ON isles.id = up.id AND isles.deleted_at IS NULL ORDER BY up.n`,
+        )
+        .bind(focus.parent_id)
+        .all<IsleRow>()
+      for (const p of up) {
+        if (p.id !== root.parent_id || !this.canSeeIsle(p)) break
+        root = p
+      }
     }
     const rows: IsleRow[] = [root]
     let frontier = [root.id]
@@ -997,7 +1006,11 @@ export class Store {
     // titles of isles drawn from outside the family, so the graph can name them
     const outside = [...new Set([...versionsOf.values()].flatMap((vs) => vs.flatMap((v) => v.draws.map((d) => d.isle))))].filter((d) => !rows.some((r) => r.id === d))
     const outsideTitle = new Map<string, string>()
-    for (const oid of outside.slice(0, 40)) { const o = await this.isleRow(oid); if (o && this.canSeeIsle(o)) outsideTitle.set(o.id, o.title) }
+    if (outside.length) {
+      const few = outside.slice(0, 40)
+      const { results } = await this.d1.prepare(`SELECT * FROM isles WHERE id IN (${few.map(() => '?').join(',')}) AND deleted_at IS NULL`).bind(...few).all<IsleRow>()
+      for (const o of results) if (this.canSeeIsle(o)) outsideTitle.set(o.id, o.title)
+    }
     // the first version's time is when the isle was made
     for (const r of rows) { const v = versionsOf.get(r.id)!; if (v[0]) v[0].createdAt = Math.min(v[0].createdAt, r.created_at) }
 
@@ -1013,16 +1026,19 @@ export class Store {
     const dataDelta = (a: Record<string, string>, b: Record<string, string>): DataDelta[] =>
       [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => a[k] !== b[k]).map((k) => ({ slot: k, from: name(a[k]), to: name(b[k]) }))
 
-    // page text, read once per distinct page (and only as many as are worth comparing)
-    const texts = new Map<string, Promise<string>>()
-    const textOf = (hash: string) => { if (!texts.has(hash)) texts.set(hash, this.blobText(hash)); return texts.get(hash)! }
-    let reads = 0
-    const page = async (a: string, b: string) => {
+    // which pages to compare: each step gets its delta after the loop, from pageDeltas (at most 160 pairs)
+    const pairs = new Map<string, { a: string; b: string }>()
+    const pending: { steps: EvolutionStep[]; n: number; key: string }[] = []
+    const page = (steps: EvolutionStep[], n: number, a: string, b: string) => {
       if (a === b) return { similarity: 1, added: 0, removed: 0 }
-      if (!pages || ++reads > 160) return null
-      return pageChanges(await textOf(a), await textOf(b))
+      const key = `${a}:${b}`
+      if (!pages || (!pairs.has(key) && pairs.size >= 160)) return null
+      pairs.set(key, { a, b })
+      pending.push({ steps, n, key })
+      return null
     }
 
+    await this.persons(rows.map((r) => r.owner_id))
     const byId = new Map(rows.map((r) => [r.id, r]))
     const out = new Map<string, EvolutionIsle>()
     for (const r of rows) {
@@ -1034,13 +1050,13 @@ export class Store {
         let data: DataDelta[] = []
         if (n > 0) {
           const prev = vs[n - 1]!
-          delta = await page(prev.source, v.source)
+          delta = page(steps, n, prev.source, v.source)
           data = dataDelta(prev.bindings, v.bindings)
         } else if (r.parent_id && byId.has(r.parent_id)) {
           const pvs = versionsOf.get(r.parent_id)!
           const then = pvs.find((pv) => pv.version === r.parent_version) ?? [...pvs].reverse().find((pv) => pv.createdAt <= r.created_at) ?? pvs[0]!
           parentVersion = then.version
-          delta = await page(then.source, v.source)
+          delta = page(steps, n, then.source, v.source)
           data = dataDelta(then.bindings, v.bindings)
         }
         const draws = v.draws
@@ -1048,8 +1064,11 @@ export class Store {
           .map((d) => ({ isle: d.isle, version: d.version, note: d.note, parts: d.parts ?? [], title: rows.find((r) => r.id === d.isle)?.title ?? outsideTitle.get(d.isle)!, inFamily: rows.some((r) => r.id === d.isle) }))
         steps.push({ version: v.version, note: v.note, createdAt: v.createdAt, page: delta, pageKey: v.source.slice(0, 12), data, ...(draws.length ? { draws } : {}), ...(v.changes.length ? { changes: v.changes } : {}) })
       }
-      out.set(r.id, { isle: await this.toSummary(r), parentId: r.parent_id && byId.has(r.parent_id) ? r.parent_id : null, parentVersion, depth: 0, versions: steps })
+      out.set(r.id, { isle: null!, parentId: r.parent_id && byId.has(r.parent_id) ? r.parent_id : null, parentVersion, depth: 0, versions: steps })
     }
+    const [summaries, deltas] = await Promise.all([Promise.all(rows.map((r) => this.toSummary(r))), this.pageDeltas([...pairs.values()])])
+    rows.forEach((r, i) => { out.get(r.id)!.isle = summaries[i]! })
+    for (const p of pending) p.steps[p.n]!.page = deltas.get(p.key) ?? null
     // depth-first from the root, oldest first among siblings
     const order: EvolutionIsle[] = []
     const kidsOf = new Map<string, IsleRow[]>()
@@ -1063,6 +1082,43 @@ export class Store {
     walk(root, 0)
     for (const e of out.values()) if (!order.includes(e)) order.push(e)
     return { rootId: root.id, focusId: focus.id, isles: order, truncated }
+  }
+
+  /**
+   * How page b differs from page a, for each pair, keyed `a:b`. Pages are content-addressed, so a pair's
+   * delta never changes: page_deltas keeps each one, and only the pairs not there yet read their pages
+   * from R2 (all at once).
+   */
+  private async pageDeltas(pairs: { a: string; b: string }[]): Promise<Map<string, PageDelta>> {
+    const out = new Map<string, PageDelta>()
+    if (!pairs.length) return out
+    const keys = pairs.map((p) => `${p.a}:${p.b}`)
+    const chunks: string[][] = []
+    for (let i = 0; i < keys.length; i += 90) chunks.push(keys.slice(i, i + 90))
+    const found = await Promise.all(
+      chunks.map((c) =>
+        this.d1.prepare(`SELECT pair, similarity, added, removed FROM page_deltas WHERE pair IN (${c.map(() => '?').join(',')})`).bind(...c)
+          .all<{ pair: string; similarity: number; added: number; removed: number }>(),
+      ),
+    )
+    for (const { results } of found) for (const d of results) out.set(d.pair, { similarity: d.similarity, added: d.added, removed: d.removed })
+    const missing = pairs.filter((p) => !out.has(`${p.a}:${p.b}`))
+    if (!missing.length) return out
+
+    const hashes = [...new Set(missing.flatMap((p) => [p.a, p.b]))]
+    const texts = new Map(await Promise.all(hashes.map(async (h) => [h, await this.getBlob(h).then((o) => (o ? o.text() : null))] as const)))
+    const fresh: D1PreparedStatement[] = []
+    for (const p of missing) {
+      const a = texts.get(p.a), b = texts.get(p.b)
+      const d = pageChanges(a ?? '', b ?? '')
+      out.set(`${p.a}:${p.b}`, d)
+      // a page missing from R2 is not kept, so it is compared again if it comes back
+      if (a != null && b != null)
+        fresh.push(this.d1.prepare('INSERT OR IGNORE INTO page_deltas (pair, similarity, added, removed) VALUES (?, ?, ?, ?)').bind(`${p.a}:${p.b}`, d.similarity, d.added, d.removed))
+    }
+    // a failed write only means these pages are read again next time
+    if (fresh.length) await this.d1.batch(fresh).catch((e) => console.error('page_deltas write failed', e))
+    return out
   }
 
   async listIsles(opts: { ownerId?: string; q?: string; sort?: 'recent' | 'stars'; limit?: number; offset?: number } = {}): Promise<IsleSummary[]> {
