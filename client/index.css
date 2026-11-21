@@ -295,7 +295,8 @@ pre.copy { background: var(--bg-2); border: 1px solid var(--line); border-radius
 .dt-folder input { flex: none; accent-color: var(--accent); }
 .dt-caret { display: inline-block; width: 12px; text-align: center; font-size: 13px; color: var(--muted); transition: transform 0.12s; }
 .dt-caret.open { transform: rotate(90deg); }
-.dt-num { width: 70px; text-align: right; flex: none; }
+.dt-num { width: 70px; text-align: right; flex: none; white-space: nowrap; }
+.dt-num.dt-date { width: 88px; }
 .dt .umd-item { border-top: 0; border-bottom: 1px solid var(--line); }
 .dt .umd-list .dt-folder { padding-top: 7px; padding-bottom: 7px; font-size: 13px; }
 .usage { height: 8px; border-radius: 99px; background: var(--bg-2); overflow: hidden; border: 1px solid var(--line); }

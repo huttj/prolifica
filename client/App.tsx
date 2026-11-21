@@ -140,6 +140,7 @@ export function App() {
             <Logo /> <span>Prolifica</span>
           </Link>
           {nav('/map', 'Map')}
+          {nav('/sites', 'Sites')}
           <div className="spacer" />
           {me ? (
             <UserMenu me={me} path={path} />

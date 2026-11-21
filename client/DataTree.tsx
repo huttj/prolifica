@@ -155,7 +155,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
           <span className="grow ellipsis">{f.name}</span>
           <span className="tiny muted">{f.all.length} file{f.all.length === 1 ? '' : 's'}</span>
           {!compact && <span className="tiny muted dt-num">{fmtBytes(f.all.reduce((n, d) => n + d.size, 0))}</span>}
-          {!compact && <span className="tiny muted dt-num hide-sm">{ago(Math.max(...f.all.map((d) => d.updatedAt)))}</span>}
+          {!compact && <span className="tiny muted dt-num dt-date hide-sm">{ago(Math.max(...f.all.map((d) => d.updatedAt)))}</span>}
         </div>
         {isOpen && (
           <>
@@ -204,7 +204,7 @@ export function DataTree({ datasets, storageKey, pick, compact = false, empty, o
         {s ? <span className="chip">{s}</span> : d.source?.method && d.source.method !== 'upload' ? <span className="chip">{COLLECTION_METHODS[d.source.method]}</span> : null}
         {d.public && <span className="chip">public</span>}
         <span className="tiny muted dt-num">{fmtBytes(d.size)}</span>
-        <span className="tiny muted dt-num hide-sm">{ago(d.updatedAt)}</span>
+        <span className="tiny muted dt-num dt-date hide-sm">{ago(d.updatedAt)}</span>
       </a>
     )
   }
