@@ -264,8 +264,9 @@ export interface SeaChart {
    * page: isles with the same number run the same page (the same HTML), whatever data they show.
    * short title: one to three words for the map, when its publisher gave one.
    * view name: what kind of page it is ("Discourse map"), naming its group on the map.
+   * visibility: null for a public isle; 'unlisted' or 'private' for the viewer's own isles that others don't see.
    */
-  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number | string, number?, (string | null)?, (string | null)?][]
+  isles: [string, string | null, string, number, number, Relation | null, number, number, number[], number | string, number?, (string | null)?, (string | null)?, (Exclude<Visibility, 'public'> | null)?][]
 }
 
 /** Where an isle's data came from: the original data behind each slot, and how it was collected. */

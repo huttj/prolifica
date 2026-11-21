@@ -13,7 +13,7 @@ import { navigate, usePath } from './navigate'
 import { Profile } from './Profile'
 import { SitePage, SitesIndex } from './Sites'
 import { Connect, HandlePrompt, Settings } from './Settings'
-import { Link, Logo, SessionContext, type Session } from './ui'
+import { Icon, Link, Logo, SessionContext, type Session } from './ui'
 
 /** One broken page shouldn't blank the whole app. */
 class PageBoundary extends Component<{ path: string; children: ReactNode }, { error: Error | null; path: string }> {
@@ -34,6 +34,44 @@ class PageBoundary extends Component<{ path: string; children: ReactNode }, { er
       </div>
     )
   }
+}
+
+/** The signed-in person's name in the header, opening their pages: profile, library, data, settings. */
+function UserMenu({ me, path }: { me: Me; path: string }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => setOpen(false), [path])
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('mousedown', down)
+    window.addEventListener('keydown', key)
+    return () => { window.removeEventListener('mousedown', down); window.removeEventListener('keydown', key) }
+  }, [open])
+  const items: [string, string][] = [
+    ...(me.handle ? [[`/@${me.handle}`, 'Profile'] as [string, string]] : []),
+    ['/library', 'Library'],
+    ['/data', 'My data'],
+    ['/settings', 'Settings'],
+    ...(me.isAdmin ? [['/admin', 'People'] as [string, string]] : []),
+  ]
+  const here = items.some(([to]) => path === to || path.startsWith(`${to}/`))
+  return (
+    <div className="user-menu" ref={box}>
+      <button className={`link ${here || open ? 'on' : ''}`} aria-expanded={open} onClick={() => setOpen((o) => !o)} data-pid="user-menu">
+        <span className="ellipsis">{me.handle ? `@${me.handle}` : (me.name ?? me.email)}</span>
+        <Icon name="chevron" />
+      </button>
+      {open && (
+        <div className="card user-menu-list">
+          {items.map(([to, label]) => (
+            <Link key={to} to={to} className={path === to || path.startsWith(`${to}/`) ? 'on' : ''}>{label}</Link>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function App() {
@@ -101,18 +139,10 @@ export function App() {
           <Link to="/" className="brand">
             <Logo /> <span>Prolifica</span>
           </Link>
-          {nav('/', 'Explore')}
           {nav('/map', 'Map')}
-          {nav('/sites', 'Sites', 'hide-sm')}
-          {me && nav('/library', 'Library')}
-          {me && nav('/data', 'My data', 'hide-sm')}
           <div className="spacer" />
           {me ? (
-            <>
-              {me.handle && nav(`/@${me.handle}`, `@${me.handle}`, 'hide-sm')}
-              {me.isAdmin && nav('/admin', 'People', 'hide-sm')}
-              {nav('/settings', 'Settings')}
-            </>
+            <UserMenu me={me} path={path} />
           ) : (
             !loading && (
               <Link to={`/login?next=${encodeURIComponent(path)}`} className="btn primary sm">

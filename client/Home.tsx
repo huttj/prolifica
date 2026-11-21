@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Visibility } from '../shared/types'
 import { api } from './api'
 import { ErrorBox, IsleCard, Link, useAsync, useSession } from './ui'
 
@@ -35,7 +36,13 @@ export function Home() {
     const t = setTimeout(() => setDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
-  const isles = useAsync(() => api.isles({ sort, q: debounced, limit: 60 }), [sort, debounced])
+  const [mine, setMine] = useState(false)
+  const [vis, setVis] = useState<Visibility | null>(null)
+  const filtered = !!me && (mine || !!vis)
+  const isles = useAsync(
+    () => api.isles({ sort, q: debounced, limit: 60, ...(me && mine ? { mine: 1 as const } : {}), ...(me && vis ? { visibility: vis } : {}) }),
+    [sort, debounced, me?.id, mine, vis],
+  )
 
   return (
     <div className="wrap">
@@ -62,6 +69,20 @@ export function Home() {
           <button className={sort === 'recent' ? 'on' : ''} onClick={() => setSort('recent')}>New</button>
           <button className={sort === 'stars' ? 'on' : ''} onClick={() => setSort('stars')}>Most starred</button>
         </div>
+        {me && (
+          <>
+            <div className="seg" data-pid="explore-whose">
+              <button className={!mine ? 'on' : ''} onClick={() => setMine(false)}>Everyone</button>
+              <button className={mine ? 'on' : ''} onClick={() => setMine(true)}>Mine</button>
+            </div>
+            <div className="seg" data-pid="explore-visibility">
+              <button className={!vis ? 'on' : ''} onClick={() => setVis(null)}>Any</button>
+              {(['public', 'unlisted', 'private'] as const).map((v) => (
+                <button key={v} className={vis === v ? 'on' : ''} onClick={() => setVis(v)}>{v[0]!.toUpperCase() + v.slice(1)}</button>
+              ))}
+            </div>
+          </>
+        )}
         <div className="grow" />
         <input className="field" style={{ maxWidth: 280 }} placeholder="Search isles" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
@@ -70,7 +91,7 @@ export function Home() {
         <ErrorBox error={isles.error} />
       ) : isles.data && !isles.data.length ? (
         <div className="empty">
-          {debounced ? 'No isles match that.' : (
+          {debounced || filtered ? 'No isles match that.' : (
             <>
               No isles yet. <Link to="/connect">Connect your agent</Link> and ask it to make the first one.
             </>

@@ -101,6 +101,14 @@ code, pre { font-family: var(--mono); font-size: 13px; }
 .nav a.link:hover { background: var(--bg-2); }
 .nav a.link.on { color: var(--ink); background: var(--bg-2); }
 .nav .spacer { flex: 1; }
+.user-menu { position: relative; min-width: 0; }
+.user-menu > button.link { display: inline-flex; align-items: center; gap: 4px; max-width: 220px; border: 0; background: transparent; cursor: pointer; padding: 6px 8px 6px 10px; border-radius: 8px; color: var(--ink-2); font: inherit; font-weight: 500; font-size: 14px; }
+.user-menu > button.link:hover, .user-menu > button.link.on { color: var(--ink); background: var(--bg-2); }
+.user-menu > button .icon { width: 14px; height: 14px; }
+.user-menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 170px; padding: 4px; display: flex; flex-direction: column; box-shadow: var(--shadow-lg); }
+.user-menu-list a { padding: 7px 10px; border-radius: 8px; text-decoration: none; color: var(--ink-2); font-size: 14px; }
+.user-menu-list a:hover { background: var(--bg-2); color: var(--ink); }
+.user-menu-list a.on { color: var(--ink); font-weight: 600; }
 @media (max-width: 640px) {
   .nav a.link.hide-sm, .hide-sm { display: none; }
   .brand span { display: none; }
@@ -164,6 +172,12 @@ label.lbl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4p
 .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; background: #fff; }
 .thumb .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; color: var(--muted); font-size: 13px; font-weight: 600; text-align: center; background: linear-gradient(135deg, var(--bg-2), var(--sea)); }
 .isle-card .meta { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 4px; }
+.isle-card-shot { position: relative; }
+.vis-badge { position: absolute; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 6px; border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--ink); background: color-mix(in srgb, var(--card) 88%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.vis-badge .icon { width: 13px; height: 13px; }
+/* your own isles that others don't see: hatched like their islands on the map */
+.isle-card.unlisted .meta { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 7%, transparent) 0 1px, transparent 1px 7px); }
+.isle-card.private .meta { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 10%, transparent) 0 1px, transparent 1px 4px), color-mix(in srgb, var(--muted) 10%, var(--card)); }
 .isle-card .title { font-weight: 650; }
 .isle-card .by { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
 .stars { color: var(--star); font-weight: 650; display: inline-flex; gap: 3px; align-items: center; }
@@ -451,6 +465,8 @@ body.page-picking, body.page-picking * { cursor: crosshair !important; }
 .kin > div { display: flex; gap: 6px; align-items: baseline; }
 .kin > div > b:first-child { position: relative; top: 1px; }
 .kin span b { color: var(--ink); font-weight: 600; }
+.vis-key { display: inline-block; width: 14px; height: 10px; border-radius: 45%; vertical-align: middle; margin-right: 4px; background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 30%, transparent) 0 1px, transparent 1px 5px), var(--land-2); }
+.vis-key.private { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--ink) 45%, transparent) 0 1px, transparent 1px 3px), color-mix(in srgb, var(--muted) 35%, var(--land-2)); }
 .hill-key { display: inline-block; width: 14px; height: 10px; border-radius: 50% 50% 40% 40%; background: radial-gradient(circle at 50% 45%, var(--hill) 0 35%, var(--land-1) 36% 70%, var(--sand) 71%); vertical-align: middle; margin-right: 4px; }
 .bank-key { display: inline-block; width: 14px; height: 9px; border-radius: 5px; background: var(--sand); opacity: 0.8; vertical-align: middle; margin-right: 4px; }
 .sea-search { position: absolute; top: 14px; right: 14px; width: min(300px, calc(100% - 28px)); }

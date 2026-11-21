@@ -99,6 +99,8 @@ interface Isl {
   /** what the map writes under it: what's particular to it, without its group's name */
   label: string
   seed: number
+  /** the viewer's own isle that others don't see: drawn hatched */
+  vis: 'unlisted' | 'private' | null
 }
 
 interface Shoal {
@@ -158,7 +160,7 @@ const cellKey = (x: number, y: number) => `${Math.floor(x / CELL)},${Math.floor(
 
 function buildWorld(chart: SeaChart): World {
   const byId = new Map<string, Isl>()
-  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page, short, viewName], n) => {
+  const isles: Isl[] = chart.isles.map(([id, , title, p, stars, relation, , , data, shot, page, short, viewName, vis], n) => {
     const [handle, name] = chart.people[p] ?? [null, null]
     const seed = hash(id)
     const isl = {
@@ -187,6 +189,7 @@ function buildWorld(chart: SeaChart): World {
       short: short?.trim() || null,
       viewName: viewName?.trim() || null,
       label: '',
+      vis: vis ?? null,
     } as unknown as Isl
     byId.set(id, isl)
     return isl
@@ -851,6 +854,36 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     }
   }
 
+  /**
+   * The viewer's own unlisted and private isles, which no one else sees on the map: hatched over the land,
+   * a private one closer and greyer.
+   */
+  const veil = (m: Isl) => {
+    const r = m.r * k
+    if (!m.vis || r < 3) return
+    const x = sx(m.x), y = sy(m.y), e = r * 1.3
+    ctx.save()
+    ctx.setTransform(dpr * r, 0, 0, dpr * r, dpr * x, dpr * y)
+    ctx.clip(S[m.shape]!)
+    base()
+    if (m.vis === 'private') {
+      ctx.globalAlpha = 0.25
+      ctx.fillStyle = t.muted
+      ctx.fillRect(x - e, y - e, e * 2, e * 2)
+    }
+    ctx.globalAlpha = m.vis === 'private' ? 0.35 : 0.25
+    ctx.strokeStyle = t.ink
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    const gap = m.vis === 'private' ? 4 : 7
+    for (let d = -2 * e; d <= 2 * e; d += gap) {
+      ctx.moveTo(x + d - e, y + e)
+      ctx.lineTo(x + d + e, y - e)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
   ctx.fillStyle = t.deep
   for (const m of shown) {
     const h = heightOf(m.stars)
@@ -880,6 +913,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
     }
     if (levels >= 3 && r > 10) { ctx.fillStyle = t.ink; ctx.globalAlpha = 0.55; blob(0, sx(m.x) + ox * levels * 0.6, sy(m.y) + oy * levels * 0.6, Math.max(1.5, r * 0.05)); ctx.globalAlpha = 1 }
   }
+  for (const m of shown) veil(m)
 
   // what the pointer is on: everything else washes out; its kin come back, joined to it
   base()
@@ -911,6 +945,7 @@ function render(ctx: CanvasRenderingContext2D, w: World, v: View, size: { w: num
       blob(o.shape, sx(o.x), sy(o.y), o.r * k * 1.1)
       ctx.fillStyle = t.lands[o.tint]!
       blob(o.shape, sx(o.x), sy(o.y), o.r * k)
+      veil(o)
     }
     base()
     // its remix lineage: where it came from and what grew from it, when the look changed
@@ -1398,6 +1433,8 @@ function Sea({ world }: { world: World }) {
           <span><b className="remix-key" />remixed (a new look)</span>
           <span><b className="bank-key" />more sand, more data</span>
           <span><b className="hill-key" />higher, more stars</span>
+          {world.isles.some((m) => m.vis === 'unlisted') && <span><b className="vis-key unlisted" />your unlisted isles</span>}
+          {world.isles.some((m) => m.vis === 'private') && <span><b className="vis-key private" />your private isles</span>}
         </div>
       </div>
       {hover && <HoverCard target={hover} world={world} pinned={pinned} onOpen={() => open(hover)} />}
@@ -1490,6 +1527,7 @@ function HoverCard({ target, world, pinned, onOpen }: { target: Target; world: W
         <div className="row small muted" style={{ gap: 6, marginTop: 2 }}>
           <span className="ellipsis">{m.by}</span>
           <RelationChip relation={m.relation} />
+          {m.vis && <span className="chip">{m.vis}</span>}
           <span className="grow" />
           {m.stars > 0 && <span className="stars"><Icon name="star" filled /> {m.stars}</span>}
         </div>

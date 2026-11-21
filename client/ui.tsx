@@ -91,6 +91,8 @@ const ICONS: Record<string, string> = {
   gear: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
   expand: 'M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7',
   sparkle: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
+  link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
+  chevron: 'M6 9l6 6 6-6',
   folders: 'M3 7.5A1.5 1.5 0 014.5 6H9l2 2h8.5A1.5 1.5 0 0121 9.5v8a1.5 1.5 0 01-1.5 1.5h-15A1.5 1.5 0 013 17.5zM8 13h8M12 11l-2 2 2 2',
 }
 
@@ -162,14 +164,20 @@ export function Thumb({ src, title }: { src: string; title?: string }) {
 
 export function IsleCard({ isle }: { isle: IsleSummary }) {
   return (
-    <Link to={`/i/${isle.id}`} className="card isle-card">
-      <Thumb src={isle.shotUrl} title={isle.title} />
+    <Link to={`/i/${isle.id}`} className={`card isle-card ${isle.visibility}`}>
+      <div className="isle-card-shot">
+        <Thumb src={isle.shotUrl} title={isle.title} />
+        {isle.visibility !== 'public' && (
+          <span className="vis-badge">
+            <Icon name={isle.visibility === 'private' ? 'lock' : 'link'} /> {isle.visibility === 'private' ? 'Private' : 'Unlisted'}
+          </span>
+        )}
+      </div>
       <div className="meta">
         <div className="title ellipsis">{isle.title}</div>
         <div className="by">
           <span className="ellipsis">{who(isle.owner)}</span>
           <RelationChip relation={isle.relation} />
-          {isle.visibility !== 'public' && <span className="chip">{isle.visibility}</span>}
           <span className="grow" />
           {isle.starCount > 0 && (
             <span className="stars">

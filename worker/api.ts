@@ -208,12 +208,17 @@ async function ownerIdFor(env: Env, handle: string | null) {
 
 api.get('/api/isles', async (request, env) => {
   const q = new URL(request.url).searchParams
-  return store(request, env).listIsles({
-    ownerId: await ownerIdFor(env, q.get('handle')),
+  const s = store(request, env)
+  const vis = q.get('visibility')
+  if (q.has('mine') && !s.viewer) return error(401, 'Sign in first')
+  return s.listIsles({
+    ownerId: q.has('mine') ? s.viewer!.id : await ownerIdFor(env, q.get('handle')),
     q: q.get('q') ?? undefined,
     sort: q.get('sort') === 'stars' ? 'stars' : 'recent',
     limit: Number(q.get('limit')) || 40,
     offset: Number(q.get('offset')) || 0,
+    withMine: true,
+    visibility: vis === 'public' || vis === 'unlisted' || vis === 'private' ? vis : undefined,
   })
 })
 /** Publish a page made elsewhere (Codinger), the same as the MCP publish_isle: new, an update (id) or a remix (parent). */
@@ -326,8 +331,11 @@ api.get('/api/collectors/:hash', async (request, env) => {
 })
 
 api.get('/api/forest', (request, env) => store(request, env).forest())
-api.get('/api/chart', async (request, env) =>
-  Response.json(await store(request, env).chart(), { headers: { 'cache-control': 'public, max-age=30' } }),
+api.get('/api/chart', async (request, env) => {
+  const s = store(request, env)
+  // a signed-in viewer's chart has their own unlisted and private isles: never shared from a cache
+  return Response.json(await s.chart(), { headers: { 'cache-control': s.viewer ? 'private, no-store' : 'public, max-age=30', vary: 'cookie, authorization' } })
+},
 )
 
 api.get('/api/library', async (request, env) => {

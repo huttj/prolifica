@@ -1121,14 +1121,25 @@ export class Store {
     return out
   }
 
-  async listIsles(opts: { ownerId?: string; q?: string; sort?: 'recent' | 'stars'; limit?: number; offset?: number } = {}): Promise<IsleSummary[]> {
+  /**
+   * withMine: with no ownerId, the viewer's own unlisted and private isles come with everyone's public ones.
+   * visibility: only isles with that visibility (others' isles are only ever public).
+   */
+  async listIsles(opts: { ownerId?: string; q?: string; sort?: 'recent' | 'stars'; limit?: number; offset?: number; withMine?: boolean; visibility?: Visibility } = {}): Promise<IsleSummary[]> {
     const where = ['deleted_at IS NULL']
     const args: unknown[] = []
     if (opts.ownerId) {
       where.push('owner_id = ?')
       args.push(opts.ownerId)
       if (opts.ownerId !== this.viewer?.id) where.push(`visibility = 'public'`)
+    } else if (opts.withMine && this.viewer) {
+      where.push(`(visibility = 'public' OR owner_id = ?)`)
+      args.push(this.viewer.id)
     } else where.push(`visibility = 'public'`)
+    if (opts.visibility) {
+      where.push('visibility = ?')
+      args.push(opts.visibility)
+    }
     const q = opts.q?.trim().toLowerCase().replace(/[%_]/g, '')
     if (q) {
       where.push('(lower(title) LIKE ? OR lower(description) LIKE ?)')
@@ -1600,26 +1611,30 @@ export class Store {
   }
 
   /** Every public isle in one flat, compact list, oldest first: the client lays out and draws the sea. */
+  /** The map: every public isle, and the viewer's own unlisted and private ones. */
   async chart(limit = 20000): Promise<SeaChart> {
+    // no one has the id '': a visitor gets the public isles only
+    const me = this.viewer?.id ?? ''
     const isles = await this.d1
       .prepare(
-        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.squashes, i.source_blob, i.short_title, i.view_name, u.handle, u.name
+        `SELECT i.id, i.parent_id, i.title, i.star_count, i.relation, i.created_at, i.version, i.bindings, i.owner_id, i.shot_version, i.squashes, i.source_blob, i.short_title, i.view_name, i.visibility, u.handle, u.name
          FROM isles i JOIN users u ON u.id = i.owner_id
-         WHERE i.deleted_at IS NULL AND i.visibility = 'public' ORDER BY i.created_at LIMIT ?`,
+         WHERE i.deleted_at IS NULL AND (i.visibility = 'public' OR i.owner_id = ?) ORDER BY i.created_at LIMIT ?`,
       )
-      .bind(limit)
-      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'squashes' | 'source_blob' | 'short_title' | 'view_name'> & { handle: string | null; name: string | null }>()
+      .bind(me, limit)
+      .all<Pick<IsleRow, 'id' | 'parent_id' | 'title' | 'star_count' | 'relation' | 'created_at' | 'version' | 'bindings' | 'owner_id' | 'shot_version' | 'squashes' | 'source_blob' | 'short_title' | 'view_name' | 'visibility'> & { handle: string | null; name: string | null }>()
     const data = await this.d1
       .prepare(
-        `SELECT DISTINCT d.id, d.path, d.kind, d.public, d.size FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
-         WHERE i.deleted_at IS NULL AND i.visibility = 'public' AND d.deleted_at IS NULL`,
+        `SELECT DISTINCT d.id, d.path, d.kind, d.public OR d.owner_id = ?1 AS public, d.size FROM isles i, json_each(i.bindings) j JOIN datasets d ON d.id = j.value
+         WHERE i.deleted_at IS NULL AND (i.visibility = 'public' OR i.owner_id = ?1) AND d.deleted_at IS NULL`,
       )
+      .bind(me)
       .all<{ id: string; path: string; kind: string; public: number; size: number }>()
     // where each shown dataset came from: walk derived-from up to the original data (a dataset with no parents)
     const roots = await this.d1
       .prepare(
         `WITH RECURSIVE shown(id) AS (
-           SELECT DISTINCT j.value FROM isles i, json_each(i.bindings) j WHERE i.deleted_at IS NULL AND i.visibility = 'public'
+           SELECT DISTINCT j.value FROM isles i, json_each(i.bindings) j WHERE i.deleted_at IS NULL AND (i.visibility = 'public' OR i.owner_id = ?1)
          ), up(start, id) AS (
            SELECT id, id FROM shown
            UNION
@@ -1627,9 +1642,10 @@ export class Store {
            UNION
            SELECT up.start, t.id FROM up JOIN datasets s ON s.id = up.id JOIN datasets t ON t.blob = s.blob AND t.id != s.id AND t.deleted_at IS NULL
          )
-         SELECT DISTINCT up.start, d.id, d.path, d.kind, d.public, d.size FROM up JOIN datasets d ON d.id = up.id AND d.deleted_at IS NULL
+         SELECT DISTINCT up.start, d.id, d.path, d.kind, d.public OR d.owner_id = ?1 AS public, d.size FROM up JOIN datasets d ON d.id = up.id AND d.deleted_at IS NULL
          WHERE up.id != up.start AND NOT EXISTS (SELECT 1 FROM edges p WHERE p.src_kind = 'dataset' AND p.src_id = up.id AND p.rel = 'derived')`,
       )
+      .bind(me)
       .all<{ start: string; id: string; path: string; kind: string; public: number; size: number }>()
     const dataIndex = new Map<string, number>()
     const chart: SeaChart = { islesOrigin: islesOrigin(this.request, this.env), people: [], data: [], isles: [] }
@@ -1663,11 +1679,11 @@ export class Store {
       const uses = Object.values(parseJson<Record<string, string>>(r.bindings, {}))
         .map((id) => dataIndex.get(id))
         .filter((i): i is number => i !== undefined)
-      // a parent that isn't public stays unnamed: its id is the only way in to an unlisted isle
+      // a parent that isn't shown stays unnamed: its id is the only way in to an unlisted isle
       const parent = r.parent_id && shown.has(r.parent_id) ? r.parent_id : null
       let page = pageIndex.get(r.source_blob)
       if (page === undefined) pageIndex.set(r.source_blob, (page = pageIndex.size))
-      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.squashes ? shotTag(r) : (r.shot_version ?? 0), page, r.short_title ?? null, r.view_name ?? null])
+      chart.isles.push([r.id, parent, r.title, p, r.star_count, parent ? r.relation : null, r.created_at, r.version, [...new Set(uses)], r.squashes ? shotTag(r) : (r.shot_version ?? 0), page, r.short_title ?? null, r.view_name ?? null, r.visibility === 'public' ? null : r.visibility])
     }
     return chart
   }

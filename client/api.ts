@@ -73,7 +73,7 @@ export const api = {
   person: (handle: string) => call<{ person: Person; following: boolean; isMe: boolean }>('GET', `/api/people/${encodeURIComponent(handle)}`),
   follow: (handle: string, on: boolean) => call('POST', `/api/people/${encodeURIComponent(handle)}/follow`, { on }),
 
-  isles: (o: { sort?: 'recent' | 'stars'; q?: string; handle?: string; limit?: number; offset?: number } = {}) => call<IsleSummary[]>('GET', `/api/isles${q(o)}`),
+  isles: (o: { sort?: 'recent' | 'stars'; q?: string; handle?: string; limit?: number; offset?: number; mine?: 1; visibility?: Visibility } = {}) => call<IsleSummary[]>('GET', `/api/isles${q(o)}`),
   isle: (id: string) => call<Isle>('GET', `/api/isles/${id}`),
   isleSource: (id: string, v?: number) => call<string>('GET', `/api/isles/${id}/source${v ? `?v=${v}` : ''}`, undefined, { as: 'text' }),
   evolution: (id: string) => call<Evolution>('GET', `/api/isles/${id}/evolution`),
