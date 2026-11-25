@@ -4,8 +4,9 @@ import { appOrigin, getAuth, isIslesHost, readBearer } from './auth'
 import { Db } from './db'
 import { handleIslesHost } from './islehost'
 import { handleMcp } from './mcp'
+import { assetOr404, isleShellParts, looksLikeFile } from './agent'
 import { consentPage, esc, isleShareTags, page, signInPage } from './pages'
-import { shotTag } from './store'
+import { shotTag, Store } from './store'
 
 /**
  * One worker, two hosts:
@@ -72,20 +73,30 @@ async function islePage(request: Request, env: Env, id: string): Promise<Respons
   if (!row || row.visibility === 'private' || !res.headers.get('content-type')?.includes('text/html')) return res
   const origin = appOrigin(request, env)
   const share = isleShareTags({ title: row.title, description: row.description, owner: row.handle, url: `${origin}/i/${row.id}`, image: `${origin}/api/isles/${row.id}/shot?og&v=${shotTag(row)}` })
+  // for readers that do not run the app (agents): where its JSON, markdown and data are. Made as for no one
+  // signed in, whoever asks.
+  const data = await new Store(env, request, null).isleData(row.id).catch((e) => (console.error(e), null))
+  const agent = data ? isleShellParts(data) : { head: '', body: '' }
   return new HTMLRewriter()
     .on('title', { element: (e) => void e.setInnerContent(share.title) })
     .on('meta[name="description"]', { element: (e) => void e.setAttribute('content', share.description) })
-    .on('head', { element: (e) => void e.append(share.tags, { html: true }) })
+    .on('head', { element: (e) => void e.append(share.tags + agent.head, { html: true }) })
+    .on('div#root', { element: (e) => void (agent.body && e.setInnerContent(agent.body, { html: true })) })
     .transform(res)
 }
+
 
 const app: ExportedHandler<EnvWithOAuth> = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url)
     if (url.pathname === '/authorize') return authorize(request, env)
     if (url.pathname.startsWith('/api/') || url.pathname === '/auth/verify') return api.fetch(request, env, ctx)
+    if (url.pathname === '/llms.txt' || /^\/i\/[a-z0-9]+\.md$/.test(url.pathname)) return api.fetch(request, env, ctx)
     const isle = request.method === 'GET' && /^\/i\/([a-z0-9]+)(?:\/family)?\/?$/.exec(url.pathname)
     if (isle) return islePage(request, env, isle[1]!)
+    const asJson = /^\/i\/([a-z0-9]+)\.json$/.exec(url.pathname)
+    if (asJson) return Response.redirect(`${appOrigin(request, env)}/api/isles/${asJson[1]}${url.search}`, 302)
+    if (looksLikeFile(url.pathname)) return assetOr404(request, env)
     if (url.pathname === '/login' && url.searchParams.has('next')) return env.ASSETS.fetch(new Request(new URL('/', url), request))
     return env.ASSETS.fetch(request)
   },

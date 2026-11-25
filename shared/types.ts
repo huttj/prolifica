@@ -114,7 +114,10 @@ export interface Isle extends IsleSummary {
   /** Markdown for agents on how to use and rebind this page: what drives its wording, what is fixed, its quirks. */
   instructions: string | null
   slots: Record<string, SlotSpec>
-  bindings: Record<string, DatasetRef | null>
+  /** url: the slot's content through the isle; raw: the dataset's own address, null when it is private */
+  bindings: Record<string, (DatasetRef & { url: string; raw: string | null }) | null>
+  /** the agent view (markdown) and the list of the isle's data, for agents */
+  links: { markdown: string; data: string }
   parent: IsleSummary | null
   childCount: number
   uses: { isle: IsleSummary; selector: string | null; label: string | null }[]
@@ -342,4 +345,88 @@ export interface Evolution {
   isles: EvolutionIsle[]
   /** true when the family is bigger than what's shown */
   truncated: boolean
+}
+
+/**
+ * Every data file of an isle at one version, with addresses that work without signing in, for agents
+ * that only have the page's address (GET /api/isles/<id>/data?v=<n>).
+ */
+export interface IsleData {
+  isle: {
+    id: string
+    title: string
+    description: string | null
+    owner: Person
+    visibility: Visibility
+    /** the version these files are bound at */
+    version: number
+    /** the isle's newest version */
+    latest: number
+    parentId: string | null
+    relation: Relation | null
+    /** markdown for agents on how to use and rebind the page, at this version */
+    instructions: string | null
+    links: IsleLinks
+  }
+  slots: IsleDataSlot[]
+  /** the data the bound data was made from (all the way up), when known and readable */
+  sources: IsleDataSource[]
+}
+
+export interface IsleLinks {
+  /** the isle's page in the app */
+  page: string
+  /** the isle as JSON */
+  json: string
+  /** the agent view (markdown) */
+  markdown: string
+  /** this list */
+  data: string
+  /** the page's HTML as the author wrote it (text/plain) */
+  html: string
+  /** where the page runs, with the data; null for a private isle */
+  live: string | null
+  parent: string | null
+  lineage: string
+}
+
+export interface IsleDataSlot {
+  slot: string
+  /** the kind the slot declares */
+  kind: DataKind | 'any' | null
+  slotDescription: string | null
+  /** null when the slot is unbound or its data was deleted */
+  dataset: IsleDataFile | null
+  /** the slot's content through the isle; works for anyone who can see the isle */
+  url: string
+}
+
+export interface IsleDataFile {
+  id: string
+  path: string
+  kind: DataKind
+  description: string | null
+  contentType: string
+  size: number
+  owner: Person
+  /** the dataset's own raw address; null when the dataset is private (read it through url) */
+  raw: string | null
+  /** ids of the data it was made from (in sources) */
+  derivedFrom: string[]
+  transform: string | null
+  source: IsleDataProvenance | null
+}
+
+export interface IsleDataSource extends IsleDataFile {
+  /** the slots this data feeds, directly or through data made from it */
+  feeds: string[]
+}
+
+export interface IsleDataProvenance {
+  method: CollectionMethod | null
+  url: string | null
+  notes: string | null
+  collectedAt: number | null
+  /** the collector code, when one was recorded */
+  code: string | null
 }

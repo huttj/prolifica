@@ -7,6 +7,7 @@ import {
 } from './auth'
 import { Db, toPerson, type UserRow } from './db'
 import { sendMagicLink, sendStorageGranted, sendStorageRequest } from './email'
+import { isleMarkdown, llmsTxt } from './agent'
 import { badLinkPage, confirmLinkPage } from './pages'
 import { ogKey, rectsKey, shootLater, shootOldLater, shotKey } from './shots'
 import { shotTag, Store, StoreError, type Layer, type PublishInput, type SourceInput } from './store'
@@ -57,6 +58,32 @@ async function body<T = Record<string, unknown>>(request: IRequest): Promise<T> 
     return (await request.json()) as T
   } catch {
     throw new StoreError(400, 'Expected a JSON body')
+  }
+}
+
+/**
+ * Opens a response to scripts on any site (Access-Control-Allow-Origin: *), only when it was made for no one
+ * in particular: a request with no session and no key, for something anyone may see. Never for a private isle.
+ */
+function openToAll(res: Response, request: IRequest, anyone: boolean): Response {
+  res.headers.append('vary', 'cookie, authorization')
+  if ((request as AuthedRequest).user) res.headers.set('cache-control', 'private, no-store')
+  else if (anyone) res.headers.set('access-control-allow-origin', '*')
+  return res
+}
+
+/** ?v=<n>: a version of an isle; absent or empty for the current one. */
+function versionParam(request: IRequest): number | undefined {
+  const v = new URL(request.url).searchParams.get('v')
+  return v === null || v === '' ? undefined : Number(v)
+}
+
+/** Headers for raw data served from the app's origin: never run as a page here, whatever its type. */
+function rawHeaders(contentType: string): Record<string, string> {
+  return {
+    'content-type': contentType.startsWith('text/') && !contentType.includes('charset') ? `${contentType}; charset=utf-8` : contentType,
+    'content-security-policy': "default-src 'none'; img-src * data:; style-src 'unsafe-inline'; sandbox",
+    'x-content-type-options': 'nosniff',
   }
 }
 
@@ -232,7 +259,24 @@ api.post('/api/isles', requireAuth, async (request, env, ctx) => {
   shootLater(ctx, env, out.isle.id, islesOrigin(request, env))
   return out
 })
-api.get('/api/isles/:id', async (request, env) => (await store(request, env).getIsle(request.params.id!)).isle)
+api.get('/api/isles/:id', async (request, env) => {
+  const { isle } = await store(request, env).getIsle(request.params.id!)
+  return openToAll(json(isle), request, isle.visibility !== 'private')
+})
+/** Every data file of the isle at a version (?v=, the current one by default), with addresses, for agents. */
+api.get('/api/isles/:id/data', async (request, env) => {
+  const data = await store(request, env).isleData(request.params.id!, versionParam(request))
+  return openToAll(json(data), request, data.isle.visibility !== 'private')
+})
+/** The content of one slot of the isle at a version (?v=), for whoever can see the isle. */
+api.get('/api/isles/:id/data/:slot', async (request, env) => {
+  const s = store(request, env)
+  const { isle, data } = await s.isleSlotData(request.params.id!, decodeURIComponent(request.params.slot!), versionParam(request))
+  const obj = await s.getBlob(data.blob)
+  if (!obj) return error(404, 'The bytes are missing')
+  const res = new Response(obj.body, { headers: { ...rawHeaders(data.content_type), etag: `"${data.blob}"`, 'cache-control': isle.visibility === 'private' ? 'private, no-store' : 'public, max-age=60' } })
+  return openToAll(res, request, isle.visibility !== 'private')
+})
 api.get('/api/isles/:id/source', async (request, env) => {
   const v = Number(new URL(request.url).searchParams.get('v')) || undefined
   return new Response(await store(request, env).isleSource(request.params.id!, v), { headers: { 'content-type': 'text/plain; charset=utf-8' } })
@@ -385,14 +429,9 @@ api.get('/api/data/:id/raw', async (request, env) => {
   const { dataset, row } = await s.getDataset(request.params.id!)
   const obj = await s.getBlob(row.blob)
   if (!obj) return error(404, 'The bytes are missing')
-  return new Response(obj.body, {
-    headers: {
-      'content-type': dataset.contentType.startsWith('text/') ? `${dataset.contentType}; charset=utf-8` : dataset.contentType,
-      'content-security-policy': "default-src 'none'; img-src * data:; style-src 'unsafe-inline'; sandbox",
-      'x-content-type-options': 'nosniff',
-      'cache-control': 'private, no-cache',
-    },
-  })
+  const res = new Response(obj.body, { headers: { ...rawHeaders(dataset.contentType), 'cache-control': 'private, no-cache' } })
+  // a dataset seen through a comment is not public on its own
+  return openToAll(res, request, dataset.public)
 })
 api.patch('/api/data/:id', requireAuth, async (request, env) => {
   const b = await body<{ path?: string; description?: string | null; public?: boolean; source?: SourceInput; derived_from?: string[] }>(request)
@@ -448,6 +487,32 @@ api.patch('/api/admin/users/:id', requireAdmin, async (request, env) => {
     else if (Number.isFinite(now)) await sendStorageGranted(env, u.email, fmtMB(now), link)
   }
   return { ok: true }
+})
+
+// ---- for agents that have only an address (see agent.ts) ----
+
+const textResponse = (body: string, type: string, status = 200) => new Response(body, { status, headers: { 'content-type': `${type}; charset=utf-8`, 'x-content-type-options': 'nosniff' } })
+
+api.get('/llms.txt', (request, env) => {
+  const res = textResponse(llmsTxt(appOrigin(request as unknown as Request, env), islesOrigin(request as unknown as Request, env)), 'text/plain')
+  res.headers.set('cache-control', 'public, max-age=300')
+  res.headers.set('access-control-allow-origin', '*')
+  return res
+})
+
+/** /i/<id>.md: the isle as markdown for agents. */
+api.get('/i/:file', async (request, env) => {
+  const m = /^([a-z0-9]+)\.md$/.exec(request.params.file!)
+  if (!m) return textResponse('Not found', 'text/plain', 404)
+  try {
+    const data = await store(request, env).isleData(m[1]!, versionParam(request))
+    const res = textResponse(isleMarkdown(data, `${appOrigin(request as unknown as Request, env)}/mcp`), 'text/markdown')
+    if (data.isle.visibility === 'unlisted') res.headers.set('x-robots-tag', 'noindex')
+    return openToAll(res, request, data.isle.visibility !== 'private')
+  } catch (e) {
+    if (e instanceof StoreError) return textResponse(e.message, 'text/plain', e.status)
+    throw e
+  }
 })
 
 api.all('/api/*', () => error(404, 'No such endpoint'))

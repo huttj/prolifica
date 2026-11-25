@@ -3,7 +3,7 @@ import { imagesIn } from '../shared/images'
 import { siteOf } from '../shared/site'
 import { COLLECTION_METHODS, type PageDelta, type SeaChart, type SiteCollector, type SiteDataset, type SiteInfo, type SiteSummary } from '../shared/types'
 import type {
-  Anchor, AnchorState, CollectionMethod, DataDelta, IsleSource, IsleSources, DataKind, DataSource, Dataset, DatasetRef, Evolution, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
+  Anchor, AnchorState, CollectionMethod, DataDelta, IsleSource, IsleSources, DataKind, DataSource, Dataset, DatasetRef, Evolution, IsleData, IsleDataFile, IsleLinks, EvolutionIsle, EvolutionStep, Isle, IsleSummary, LibraryItem, Lineage, Mark, MarkKind, Person, SlotSpec, TreeNode, Visibility,
 } from '../shared/types'
 import { appOrigin, islesOrigin, quotaFor, signIsle } from './auth'
 import { Db, sha256Hex, shortId, toPerson, type UserRow } from './db'
@@ -829,11 +829,14 @@ export class Store {
         ).results
       : []
     const byId = new Map(dataRows.map((r) => [r.id, r]))
-    const bound: Record<string, DatasetRef | null> = {}
+    const origin = appOrigin(this.request, this.env)
+    const bound: Isle['bindings'] = {}
     for (const [slot, did] of Object.entries(bindings)) {
       const d = byId.get(did)
       // data bound to an isle you can see is visible through it, even if private on its own
-      bound[slot] = d ? await this.toDatasetRef(d) : null
+      bound[slot] = d
+        ? { ...(await this.toDatasetRef(d)), url: `${origin}/api/isles/${row.id}/data/${encodeURIComponent(slot)}`, raw: this.canReadDataset(d) ? `${origin}/api/data/${d.id}/raw` : null }
+        : null
     }
     const parentRow = row.parent_id ? await this.isleRow(row.parent_id) : null
     const childCount = (await this.d1.prepare('SELECT COUNT(*) AS n FROM isles WHERE parent_id = ? AND deleted_at IS NULL AND visibility != ?').bind(id, 'private').first<{ n: number }>())?.n ?? 0
@@ -888,6 +891,7 @@ export class Store {
         instructions: row.instructions ?? null,
         slots: parseJson(row.slots, {}),
         bindings: bound,
+        links: { markdown: `${origin}/i/${row.id}.md`, data: `${origin}/api/isles/${row.id}/data` },
         parent: parentRow && this.canSeeIsle(parentRow) ? await this.toSummary(parentRow) : null,
         childCount,
         uses,
@@ -952,6 +956,148 @@ export class Store {
     const wanted = new Set(sources.map((s) => s.site).filter((s): s is string => !!s))
     const sites = wanted.size ? (await this.sites(500)).filter((x) => wanted.has(x.site)) : []
     return { sources, sites }
+  }
+
+  /**
+   * An isle's page, bindings and instructions at one version (the current one when v is not given). Each
+   * older version keeps its own in isle_versions; the slots are the isle's current ones.
+   */
+  async isleAtVersion(id: string, v?: number): Promise<{ row: IsleRow; version: number; bindings: Record<string, string>; instructions: string | null; sourceBlob: string }> {
+    const row = await this.visibleIsleRow(id)
+    if (v === undefined || v === row.version) return { row, version: row.version, bindings: parseJson(row.bindings, {}), instructions: row.instructions ?? null, sourceBlob: row.source_blob }
+    if (!Number.isInteger(v) || v < 1 || v > row.version) fail(404, `This isle has no version ${v}`)
+    const old = await this.d1
+      .prepare('SELECT source_blob, bindings, instructions FROM isle_versions WHERE isle_id = ? AND version = ?')
+      .bind(id, v)
+      .first<{ source_blob: string; bindings: string; instructions: string | null }>()
+    if (!old) fail(404, `This isle has no version ${v}`)
+    return { row, version: v, bindings: parseJson(old!.bindings, {}), instructions: old!.instructions ?? null, sourceBlob: old!.source_blob }
+  }
+
+  /** The addresses of an isle's own views, for agents (absolute; ?v= only for an older version). */
+  async isleLinks(row: IsleRow, version: number): Promise<IsleLinks> {
+    const origin = appOrigin(this.request, this.env)
+    const q = version < row.version ? `?v=${version}` : ''
+    const parent = row.parent_id ? await this.isleRow(row.parent_id) : null
+    return {
+      page: `${origin}/i/${row.id}`,
+      json: `${origin}/api/isles/${row.id}`,
+      markdown: `${origin}/i/${row.id}.md${q}`,
+      data: `${origin}/api/isles/${row.id}/data${q}`,
+      html: `${origin}/api/isles/${row.id}/source${q}`,
+      live: row.visibility === 'private' ? null : `${islesOrigin(this.request, this.env)}/${row.id}${q}`,
+      parent: parent && this.canSeeIsle(parent) ? `${origin}/i/${parent.id}.md` : null,
+      lineage: `${origin}/api/isles/${row.id}/lineage`,
+    }
+  }
+
+  /**
+   * Every data file of an isle at one version, and the data it was made from, with addresses. Data bound
+   * to an isle you can see is shown through it (as on the isle's page); the data it was made from is shown
+   * only when you could read it on its own.
+   */
+  async isleData(id: string, v?: number): Promise<IsleData> {
+    const at = await this.isleAtVersion(id, v)
+    const { row } = at
+    const origin = appOrigin(this.request, this.env)
+    const q = at.version < row.version ? `?v=${at.version}` : ''
+    const slots = parseJson<Record<string, SlotSpec>>(row.slots, {})
+    const boundIds = [...new Set(Object.values(at.bindings).filter((x): x is string => typeof x === 'string'))]
+    const { results: edges } = boundIds.length
+      ? await this.d1
+          .prepare(
+            `WITH RECURSIVE up(id) AS (
+               SELECT value FROM json_each(?1)
+               UNION
+               SELECT e.dst_id FROM up JOIN edges e ON e.src_kind = 'dataset' AND e.src_id = up.id AND e.rel = 'derived' AND e.dst_kind = 'dataset'
+             )
+             SELECT DISTINCT e.src_id AS child, e.dst_id AS parent FROM edges e
+             WHERE e.src_kind = 'dataset' AND e.rel = 'derived' AND e.dst_kind = 'dataset' AND e.src_id IN (SELECT id FROM up)`,
+          )
+          .bind(JSON.stringify(boundIds))
+          .all<{ child: string; parent: string }>()
+      : { results: [] as { child: string; parent: string }[] }
+    const parentsOf = new Map<string, string[]>()
+    for (const e of edges) (parentsOf.get(e.child) ?? parentsOf.set(e.child, []).get(e.child)!).push(e.parent)
+    const allIds = [...new Set([...boundIds, ...edges.map((e) => e.parent)])]
+    const { results: dataRows } = allIds.length
+      ? await this.d1.prepare('SELECT * FROM datasets WHERE id IN (SELECT value FROM json_each(?)) AND deleted_at IS NULL').bind(JSON.stringify(allIds)).all<DatasetRow>()
+      : { results: [] as DatasetRow[] }
+    const rows = new Map(dataRows.map((r) => [r.id, r]))
+    const bound = new Set(boundIds)
+    const shown = (did: string) => rows.has(did) && (bound.has(did) || this.canReadDataset(rows.get(did)!))
+    await this.persons(dataRows.filter((r) => shown(r.id)).map((r) => r.owner_id))
+    const file = (d: DatasetRow): IsleDataFile => {
+      const readable = this.canReadDataset(d)
+      return {
+        id: d.id,
+        path: d.path,
+        kind: d.kind,
+        description: d.description,
+        contentType: d.content_type,
+        size: d.size,
+        owner: this.person(d.owner_id),
+        raw: readable ? `${origin}/api/data/${d.id}/raw` : null,
+        derivedFrom: (parentsOf.get(d.id) ?? []).filter(shown),
+        transform: readable ? d.transform : null,
+        source:
+          readable && (d.source_url || d.source_method || d.source_notes || d.collected_at || d.source_code)
+            ? { method: d.source_method, url: d.source_url, notes: d.source_notes, collectedAt: d.collected_at, code: d.source_code ? `${origin}/api/data/${d.id}/collector` : null }
+            : null,
+      }
+    }
+    const names = [...Object.keys(slots), ...Object.keys(at.bindings).filter((k) => !Object.hasOwn(slots, k))]
+    const feeds = new Map<string, string[]>()
+    for (const slot of names) {
+      const start = Object.hasOwn(at.bindings, slot) ? at.bindings[slot] : undefined
+      if (typeof start !== 'string') continue
+      const seen = new Set<string>()
+      const walk = [start]
+      while (walk.length) {
+        for (const p of parentsOf.get(walk.pop()!) ?? []) if (!seen.has(p)) seen.add(p), walk.push(p)
+      }
+      for (const p of seen) (feeds.get(p) ?? feeds.set(p, []).get(p)!).push(slot)
+    }
+    await this.persons([row.owner_id])
+    const links = await this.isleLinks(row, at.version)
+    return {
+      isle: {
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        owner: this.person(row.owner_id),
+        visibility: row.visibility,
+        version: at.version,
+        latest: row.version,
+        parentId: links.parent ? row.parent_id : null,
+        relation: row.relation,
+        instructions: at.instructions,
+        links,
+      },
+      slots: names.map((slot) => {
+        const did = Object.hasOwn(at.bindings, slot) ? at.bindings[slot] : undefined
+        const d = typeof did === 'string' ? rows.get(did) : undefined
+        const spec = Object.hasOwn(slots, slot) ? slots[slot] : undefined
+        return {
+          slot,
+          kind: spec?.kind ?? null,
+          slotDescription: spec?.description ?? null,
+          dataset: d ? file(d) : null,
+          url: `${origin}/api/isles/${row.id}/data/${encodeURIComponent(slot)}${q}`,
+        }
+      }),
+      sources: allIds.filter((did) => !bound.has(did) && shown(did)).map((did) => ({ ...file(rows.get(did)!), feeds: feeds.get(did) ?? [] })),
+    }
+  }
+
+  /** The data bound to one slot of an isle at one version, for whoever can see the isle (as on its page). */
+  async isleSlotData(id: string, slot: string, v?: number): Promise<{ isle: IsleRow; data: DatasetRow }> {
+    const at = await this.isleAtVersion(id, v)
+    const did = Object.hasOwn(at.bindings, slot) ? at.bindings[slot] : undefined
+    if (typeof did !== 'string') fail(404, `This isle has no data in slot "${slot}"`)
+    const data = await this.datasetRow(did!)
+    if (!data) fail(404, `The data in slot "${slot}" was deleted`)
+    return { isle: at.row, data: data! }
   }
 
   /**
