@@ -185,7 +185,7 @@ describe('GET /i/:id.md', () => {
     expect(md).toContain('prolifica.data("<slot>")')
     const v1 = await (await get(`/i/${pub}.md?v=1`)).text()
     expect(v1).toContain('version 1 (the latest is 2)')
-    expect(v1).toContain('## Use') // the author's heading goes one level down
+    expect(v1).toContain('\n### Use\n') // the author's headings go under the section's
     expect((await get(`/i/${pub}.json.md`)).status).toBe(404)
     expect((await get(`/i/nosuchisle.md`)).status).toBe(404)
   })

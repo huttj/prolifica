@@ -77,8 +77,8 @@ export function isleMarkdown(d: IsleData, mcp: string): string {
   out.push('## Instructions for agents', '')
   if (isle.instructions?.trim()) {
     out.push(`The author of the isle wrote these notes about the page and its data.`, '')
-    // their headings go one level down, under this one
-    out.push(isle.instructions.trim().replace(/^(#{1,5}) /gm, '$1# '), '')
+    // their headings go under this section's (##): # becomes ###
+    out.push(isle.instructions.trim().replace(/^(#{1,4}) /gm, '$1## '), '')
   } else out.push('The author wrote no instructions for this page.', '')
   out.push('## Data', '')
   if (!d.slots.length) out.push('This page has no data slots.', '')
